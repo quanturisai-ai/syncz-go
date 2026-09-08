@@ -66,8 +66,14 @@ O mesmo arquivo, executável, está em [`exemplos/primeira-mensagem`](exemplos/p
 ## Contrato e compatibilidade
 
 O contrato é do gateway, não do SDK: `GET /api/v1/contract` devolve o hash do
-contrato que a sua instância está servindo. Divergiu do que este SDK espera?
-Atualize o SDK — o gateway decide as regras.
+contrato que a sua instância está servindo, a versão semântica dele
+(`contract_version`) e as versões ainda atendidas (`supported_versions`).
+Divergiu do que este SDK espera? Atualize o SDK — o gateway decide as regras.
+
+`contract_version` não é o `v1` do caminho: aquele é a versão do transporte e
+não muda. Campo ou rpc novo sobe a *minor*; remoção, renomeação ou troca de
+tipo sobe a *major*. É por ela que dá para saber se a divergência que o hash
+acusou exige trabalho seu ou não.
 
 Bug, dúvida ou pedido de capacidade: abra no repositório do gateway. Aqui não há
 código para consertar, só o resultado da publicação.
