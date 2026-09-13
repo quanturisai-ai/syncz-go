@@ -2,13 +2,16 @@ package syncz
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -25,7 +28,7 @@ type clienteGRPC struct {
 
 func novoClienteGRPC(o Opcoes) (Cliente, error) {
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(credencialTransporte(o)),
 		grpc.WithUnaryInterceptor(credencialUnary(o.ChaveAPI)),
 		grpc.WithStreamInterceptor(credencialStream(o.ChaveAPI)),
 	}
@@ -41,6 +44,58 @@ func novoClienteGRPC(o Opcoes) (Cliente, error) {
 		prazo:  o.Prazo,
 		fechar: conn.Close,
 	}, nil
+}
+
+// usaTLSGRPC decide o transporte do canal gRPC. Ordem: GRPCSemTLS desliga,
+// TLSGRPC liga, e sem opção explícita só a porta 443 explícita liga TLS. Um
+// host não-loopback sem TLS continua em texto puro de propósito: redes internas
+// (compose, k8s) usam "gateway:50051" em h2c desde a v0.1.0.
+func usaTLSGRPC(o Opcoes) bool {
+	if o.GRPCSemTLS {
+		return false
+	}
+	if o.TLSGRPC != nil {
+		return true
+	}
+	return portaGRPC(o.EnderecoGRPC) == "443"
+}
+
+// portaGRPC extrai a porta de um alvo gRPC ("host:porta", "dns:///host:porta",
+// "passthrough:///host:porta"). Alvo sem porta explícita ou unix devolve "".
+func portaGRPC(alvo string) string {
+	if strings.HasPrefix(alvo, "unix:") || strings.HasPrefix(alvo, "unix-abstract:") {
+		return ""
+	}
+	if i := strings.Index(alvo, ":///"); i >= 0 {
+		alvo = alvo[i+len(":///"):]
+	} else if i := strings.Index(alvo, "://"); i >= 0 {
+		alvo = alvo[i+len("://"):]
+		if j := strings.Index(alvo, "/"); j >= 0 {
+			alvo = alvo[j+1:]
+		}
+	}
+	_, porta, err := net.SplitHostPort(alvo)
+	if err != nil {
+		return ""
+	}
+	return porta
+}
+
+// credencialTransporte monta as credenciais de transporte a partir de Opcoes.
+// Com TLS, a config do chamador é clonada e ganha piso TLS 1.2; RootCAs nil
+// verifica o certificado contra as raízes do sistema.
+func credencialTransporte(o Opcoes) credentials.TransportCredentials {
+	if !usaTLSGRPC(o) {
+		return insecure.NewCredentials()
+	}
+	cfg := &tls.Config{}
+	if o.TLSGRPC != nil {
+		cfg = o.TLSGRPC.Clone()
+	}
+	if cfg.MinVersion == 0 {
+		cfg.MinVersion = tls.VersionTLS12
+	}
+	return credentials.NewTLS(cfg)
 }
 
 // NovoClienteGRPCComConn cria um cliente a partir de uma conexão gRPC existente (útil para testes com bufconn).

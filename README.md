@@ -54,6 +54,30 @@ func main() {
 
 O mesmo arquivo, executável, está em [`exemplos/primeira-mensagem`](exemplos/primeira-mensagem).
 
+## gRPC com TLS (gateway público)
+
+O gateway público publica gRPC na porta 443, com TLS. Endereço terminado em
+`:443` liga TLS sozinho, com o certificado verificado contra as raízes do sistema
+(a partir da `v0.1.3`):
+
+```go
+c, err := syncz.Novo(syncz.Opcoes{
+	EnderecoGRPC: "gateway.exemplo.com:443", // :443 => TLS automático
+	ChaveAPI:     os.Getenv("SYNCZ_API_KEY"),
+})
+```
+
+| Situação | Opção |
+|---|---|
+| `host:443` | nada: TLS automático, raízes do sistema |
+| TLS em outra porta, CA própria ou `ServerName` | `TLSGRPC: &tls.Config{RootCAs: pool}` |
+| texto puro (h2c) mesmo na 443 | `GRPCSemTLS: true` |
+| `localhost:50051`, `gateway:50051` (dev, rede interna) | nada: texto puro, como na `v0.1.2` |
+
+`TLSGRPC` e `GRPCSemTLS` são mutuamente exclusivos. A chave vai no metadata
+`authorization` de cada chamada nos dois transportes. Fora da sua máquina ou da
+rede interna, use TLS.
+
 ## O que vem junto
 
 | | |
