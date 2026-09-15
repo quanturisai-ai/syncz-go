@@ -23,6 +23,11 @@ var (
 	ErrIndisponivel = errors.New("syncz: servico indisponivel")
 	// ErrConfiguracao indica parâmetros de inicialização do SDK inválidos.
 	ErrConfiguracao = errors.New("syncz: erro de configuracao")
+	// ErrTransporteNaoSuporta indica que o transporte atual (hoje só o gRPC,
+	// ver clienteGRPC.StatusMensagem) não tem operação equivalente para esta
+	// chamada do Cliente -- não é erro de rede nem de estado do servidor, é
+	// limitação conhecida deste SDK/transporte. Comparável via errors.Is.
+	ErrTransporteNaoSuporta = errors.New("syncz: operacao nao suportada neste transporte")
 )
 
 // ErroAPI encapsula um erro do SDK preservando a mensagem original do servidor

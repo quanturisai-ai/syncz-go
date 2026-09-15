@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -240,5 +241,279 @@ func TestClienteREST(t *testing.T) {
 	}
 	if grupoAsync.Status != "accepted" || grupoAsync.OpID == "" {
 		t.Errorf("esperava recibo de aceite (status=accepted, op_id preenchido), obteve: %+v", grupoAsync)
+	}
+}
+
+// sseEventoData escreve um bloco SSE sem "event:" (o formato real de GET
+// /events/stream -- ver internal/transport/sse/stream.go, Stream.Send com
+// name="") e da flush imediato.
+func sseEventoData(w http.ResponseWriter, data string) {
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	w.(http.Flusher).Flush()
+}
+
+func eventosStreamCliente(t *testing.T, ts *httptest.Server) syncz.ClienteEventosStream {
+	t.Helper()
+	cli, err := syncz.Novo(syncz.Opcoes{
+		BaseURL:    ts.URL,
+		ChaveAPI:   "secret-token",
+		HTTPClient: ts.Client(),
+	})
+	if err != nil {
+		t.Fatalf("syncz.Novo: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Fechar() })
+
+	streamer, ok := cli.(syncz.ClienteEventosStream)
+	if !ok {
+		t.Fatalf("cliente REST nao implementa ClienteEventosStream")
+	}
+	return streamer
+}
+
+// TestStreamEventos_InstanceIDObrigatorio cobre a validacao client-side:
+// instance_id ausente falha sem sequer abrir a conexao HTTP (o handler falha
+// o teste se for chamado).
+func TestStreamEventos_InstanceIDObrigatorio(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("nao deveria chamar o servidor sem instance_id")
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	streamer := eventosStreamCliente(t, ts)
+
+	eventos, err := streamer.AcompanharEventos(context.Background(), "", 0)
+	if err == nil {
+		t.Fatalf("esperava erro, recebi eventos=%v", eventos)
+	}
+	if !errors.Is(err, syncz.ErrInvalido) {
+		t.Fatalf("esperava ErrInvalido, recebi: %v", err)
+	}
+	if eventos != nil {
+		t.Fatalf("esperava canal nil no erro, recebi %v", eventos)
+	}
+}
+
+// TestStreamEventos_ReplayOrdemSemGap cobre o caso central: uma sequencia de
+// eventos (seq 1,2,3) chega no canal na mesma ordem e sem gap/repeticao (CA-23
+// -- docs/homologacao/staging-2026-09.md), com from_seq aplicado corretamente
+// na query string.
+func TestStreamEventos_ReplayOrdemSemGap(t *testing.T) {
+	var instanceIDRecebido, fromSeqRecebido string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		instanceIDRecebido = r.URL.Query().Get("instance_id")
+		fromSeqRecebido = r.URL.Query().Get("from_seq")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		sseEventoData(w, `{"id":"ev-2","type":"message.received","instance_id":"inst-1","chat_jid":"5511@s.whatsapp.net","seq":2,"occurred_at":"2026-01-01T00:00:02Z","payload":{"body":"oi"},"trace_id":"tr-2"}`)
+		sseEventoData(w, `{"id":"ev-3","type":"message.received","instance_id":"inst-1","chat_jid":"5511@s.whatsapp.net","seq":3,"occurred_at":"2026-01-01T00:00:03Z","payload":{"body":"tudo bem"},"trace_id":"tr-3"}`)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	streamer := eventosStreamCliente(t, ts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	eventos, err := streamer.AcompanharEventos(ctx, "inst-1", 2)
+	if err != nil {
+		t.Fatalf("AcompanharEventos: %v", err)
+	}
+
+	var recebidos []syncz.EventoStream
+	for ev := range eventos {
+		recebidos = append(recebidos, ev)
+	}
+
+	if instanceIDRecebido != "inst-1" {
+		t.Fatalf("instance_id na query = %q, esperado inst-1", instanceIDRecebido)
+	}
+	if fromSeqRecebido != "2" {
+		t.Fatalf("from_seq na query = %q, esperado 2", fromSeqRecebido)
+	}
+
+	if len(recebidos) != 2 {
+		t.Fatalf("esperava 2 eventos, recebi %d: %+v", len(recebidos), recebidos)
+	}
+	if recebidos[0].Err != nil || recebidos[0].Evento.Seq != 2 || recebidos[0].Evento.ID != "ev-2" {
+		t.Fatalf("evento 0 inesperado: %+v", recebidos[0])
+	}
+	if recebidos[1].Err != nil || recebidos[1].Evento.Seq != 3 || recebidos[1].Evento.ID != "ev-3" {
+		t.Fatalf("evento 1 inesperado: %+v", recebidos[1])
+	}
+	if recebidos[0].Evento.Tipo != "message.received" || recebidos[0].Evento.ChatJID != "5511@s.whatsapp.net" || recebidos[0].Evento.TraceID != "tr-2" {
+		t.Fatalf("campos do evento 0 nao desserializaram como esperado: %+v", recebidos[0].Evento)
+	}
+	if recebidos[0].Evento.OcorridoEm.IsZero() {
+		t.Fatalf("esperava OcorridoEm preenchido, veio zero: %+v", recebidos[0].Evento)
+	}
+	if string(recebidos[0].Evento.Payload) != `{"body":"oi"}` {
+		t.Fatalf("payload cru inesperado: %s", recebidos[0].Evento.Payload)
+	}
+}
+
+// TestStreamEventos_FromSeqOmitidoQuandoZero cobre o outro lado da mesma
+// regra: fromSeq<=0 (nao informado) nao manda from_seq nenhum na query --
+// mesma convencao que o servidor ja trata como equivalente
+// (internal/transport/sse/stream.go, parseFromSeq).
+func TestStreamEventos_FromSeqOmitidoQuandoZero(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Has("from_seq") {
+			t.Errorf("esperava from_seq ausente da query, veio %q", r.URL.Query().Get("from_seq"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		sseEventoData(w, `{"id":"ev-1","type":"message.received","instance_id":"inst-1","seq":1,"occurred_at":"2026-01-01T00:00:01Z","payload":{}}`)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	streamer := eventosStreamCliente(t, ts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	eventos, err := streamer.AcompanharEventos(ctx, "inst-1", 0)
+	if err != nil {
+		t.Fatalf("AcompanharEventos: %v", err)
+	}
+	var count int
+	for range eventos {
+		count++
+	}
+	if count != 1 {
+		t.Fatalf("esperava 1 evento, recebi %d", count)
+	}
+}
+
+// TestStreamEventos_ErroConexaoInicial cobre erro HTTP na abertura (ex.:
+// instancia inexistente) -- deve vir como erro de retorno da chamada, sem
+// canal.
+func TestStreamEventos_ErroConexaoInicial(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"detail":"instancia inexistente"}`)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	streamer := eventosStreamCliente(t, ts)
+
+	eventos, err := streamer.AcompanharEventos(context.Background(), "nao-existe", 0)
+	if err == nil {
+		t.Fatalf("esperava erro, recebi eventos=%v", eventos)
+	}
+	if !errors.Is(err, syncz.ErrNaoEncontrado) {
+		t.Fatalf("esperava ErrNaoEncontrado, recebi: %v", err)
+	}
+	if eventos != nil {
+		t.Fatalf("esperava canal nil no erro, recebi %v", eventos)
+	}
+}
+
+// TestStreamEventos_QuedaDeConexao cobre erro de rede no meio do stream
+// (servidor mata a conexao sem fechar direito) -- deve chegar como
+// EventoStream.Err antes do canal fechar, sem travar o consumidor.
+func TestStreamEventos_QuedaDeConexao(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		sseEventoData(w, `{"id":"ev-1","type":"message.received","instance_id":"inst-1","seq":1,"occurred_at":"2026-01-01T00:00:01Z","payload":{}}`)
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatalf("ResponseWriter nao suporta Hijack neste teste")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		_ = conn.Close()
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	streamer := eventosStreamCliente(t, ts)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	eventos, err := streamer.AcompanharEventos(ctx, "inst-1", 0)
+	if err != nil {
+		t.Fatalf("AcompanharEventos: %v", err)
+	}
+
+	var recebidos []syncz.EventoStream
+	for ev := range eventos {
+		recebidos = append(recebidos, ev)
+	}
+
+	if len(recebidos) == 0 {
+		t.Fatalf("esperava ao menos o evento seq=1 antes da queda")
+	}
+	ultimo := recebidos[len(recebidos)-1]
+	if ultimo.Err == nil {
+		t.Fatalf("esperava erro de rede no ultimo evento, recebi: %+v", recebidos)
+	}
+}
+
+// TestStreamEventos_FechaPorCancelamentoDeContexto cobre o cancelamento do
+// lado do chamador: o canal deve fechar (sem EventoStream.Err, ja que
+// cancelamento nao e falha) mesmo com o servidor mandando eventos
+// indefinidamente.
+func TestStreamEventos_FechaPorCancelamentoDeContexto(t *testing.T) {
+	liberar := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/events/stream", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		seq := 0
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-liberar:
+				return
+			default:
+			}
+			seq++
+			sseEventoData(w, fmt.Sprintf(`{"id":"ev-%d","type":"message.received","instance_id":"inst-1","seq":%d,"occurred_at":"2026-01-01T00:00:01Z","payload":{}}`, seq, seq))
+			time.Sleep(5 * time.Millisecond)
+		}
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	defer close(liberar)
+
+	streamer := eventosStreamCliente(t, ts)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	eventos, err := streamer.AcompanharEventos(ctx, "inst-1", 0)
+	if err != nil {
+		t.Fatalf("AcompanharEventos: %v", err)
+	}
+
+	count := 0
+	for range eventos {
+		count++
+		if count == 2 {
+			cancel()
+		}
+	}
+
+	if count < 2 {
+		t.Fatalf("esperava ao menos 2 eventos antes do cancelamento, recebi %d", count)
 	}
 }

@@ -378,6 +378,298 @@ func (c *clienteGRPC) EnviarMidia(ctx context.Context, e EntradaEnvioMidia) (Rec
 	}, nil
 }
 
+// StatusMensagem: o proto gRPC (proto/syncz/v1/syncz.proto) não define nenhum
+// RPC equivalente a GET .../messages/{message_id} -- só SendMessage/SendMedia
+// (aceite) e StreamEvents (webhook). Decisão registrada na task 565, mesmo
+// critério da 564 (AcompanharPareamento): lá o método ficou FORA da interface
+// Cliente principal porque só o REST tinha stream; aqui a task pede
+// explicitamente que StatusMensagem ENTRE na interface principal, então
+// clienteGRPC precisa satisfazer o contrato -- devolve ErrTransporteNaoSuporta
+// de forma explícita (comparável via errors.Is) em vez de inventar um valor ou
+// falhar de outro jeito. Adicionar o RPC no proto é decisão maior (contrato
+// compartilhado entre server e SDK, cross-repo) fora do escopo desta tarefa
+// isolada de SDK client -- fica para uma task de extensão de contrato.
+func (c *clienteGRPC) StatusMensagem(_ context.Context, _, _ string) (EstadoMensagem, error) {
+	return EstadoMensagem{}, ErrTransporteNaoSuporta
+}
+
+// StatusOperacao: mesma decisão da task 565/StatusMensagem, agora para o
+// GET .../operations/{op_id}. Conferido em proto/syncz/v1/syncz.proto (task
+// 566): não existe RPC GetOperation nem equivalente -- os RPCs de grupo
+// (CreateGroup, UpdateGroupName, ...) sempre devolvem o tipo final
+// diretamente, sem op_id de acompanhamento assíncrono (o proto não modela o
+// caminho "accepted" que o REST tem via ?wait=false). Devolve
+// ErrTransporteNaoSuporta de forma explícita em vez de inventar um valor;
+// adicionar o RPC é decisão de contrato cross-repo, fora do escopo desta
+// tarefa isolada de SDK client.
+func (c *clienteGRPC) StatusOperacao(_ context.Context, _, _ string) (EstadoOperacao, error) {
+	return EstadoOperacao{}, ErrTransporteNaoSuporta
+}
+
+// AtualizarEstadoDesejado: o proto gRPC (proto/syncz/v1/syncz.proto) não tem
+// nenhum RPC equivalente a PATCH .../instances/{id} -- os RPCs de instância
+// existentes (CreateInstance, GetInstance, ListInstances, RevokeInstance,
+// GenerateWizardLink) não cobrem atualização de desired_state, e não há
+// UpdateInstance/SetDesiredState no proto (task 570, mesmo critério das
+// tasks 565/566: conferido antes de decidir, não assumido). Devolve
+// ErrTransporteNaoSuporta de forma explícita em vez de inventar um valor;
+// adicionar o RPC é decisão de contrato cross-repo, fora do escopo desta
+// tarefa isolada de SDK client.
+func (c *clienteGRPC) AtualizarEstadoDesejado(_ context.Context, _, _ string) (Instancia, error) {
+	return Instancia{}, ErrTransporteNaoSuporta
+}
+
+// enqueteFromProto traduz o Poll do proto (CreatePoll/ClosePoll) para o tipo
+// Enquete do SDK -- ver proto/syncz/v1/syncz.proto (message Poll) e
+// internal/transport/grpc/server_polls.go (pollViewParaProto, o inverso).
+func enqueteFromProto(p *synczv1.Poll) Enquete {
+	return Enquete{
+		PollID:        p.GetPollId(),
+		InstanciaID:   p.GetInstanceId(),
+		GrupoJID:      p.GetGroupJid(),
+		Pergunta:      p.GetQuestion(),
+		Opcoes:        p.GetOptions(),
+		Selecionaveis: int(p.GetSelectableCount()),
+		Encerrada:     p.GetIsClosed(),
+		CriadaEm:      parseUnixSeconds(p.GetCreatedAt()),
+	}
+}
+
+// CriarEnquete: diferente de StatusMensagem/StatusOperacao (tasks 565/566),
+// o proto TEM RPC equivalente -- CreatePoll, com wait/wait_timeout_ms iguais
+// aos de CreateGroup (ver internal/transport/grpc/server_polls.go). Sem
+// ErrTransporteNaoSuporta aqui.
+func (c *clienteGRPC) CriarEnquete(ctx context.Context, e EntradaCriarEnquete) (Enquete, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	wait, timeoutMs := e.protoWait()
+	resp, err := c.cli.CreatePoll(ctx, &synczv1.CreatePollRequest{
+		InstanceId:      e.InstanciaID,
+		GroupJid:        e.GrupoJID,
+		Question:        e.Pergunta,
+		Options:         e.Opcoes,
+		SelectableCount: int32(e.Selecionaveis),
+		Wait:            wait,
+		WaitTimeoutMs:   timeoutMs,
+	})
+	if err != nil {
+		return Enquete{}, mapearErroGRPC(err)
+	}
+	return enqueteFromProto(resp), nil
+}
+
+// ResultadoEnquete consome o RPC GetPollResults.
+func (c *clienteGRPC) ResultadoEnquete(ctx context.Context, instanciaID, pollID string) (EnqueteResultado, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	resp, err := c.cli.GetPollResults(ctx, &synczv1.GetPollResultsRequest{
+		InstanceId: instanciaID,
+		PollId:     pollID,
+	})
+	if err != nil {
+		return EnqueteResultado{}, mapearErroGRPC(err)
+	}
+
+	tallies := resp.GetTallies()
+	opcoes := make([]EnqueteOpcaoResultado, len(tallies))
+	for i, t := range tallies {
+		opcoes[i] = EnqueteOpcaoResultado{
+			Opcao:    t.GetOption(),
+			Votos:    int(t.GetCount()),
+			Votantes: t.GetVoters(),
+		}
+	}
+	return EnqueteResultado{
+		PollID:        resp.GetPollId(),
+		Opcoes:        opcoes,
+		TotalVotantes: int(resp.GetTotalVoters()),
+		CalculadoEm:   parseUnixSeconds(resp.GetComputedAt()),
+	}, nil
+}
+
+// EncerrarEnquete consome o RPC ClosePoll.
+func (c *clienteGRPC) EncerrarEnquete(ctx context.Context, instanciaID, pollID string) (Enquete, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	resp, err := c.cli.ClosePoll(ctx, &synczv1.ClosePollRequest{
+		InstanceId: instanciaID,
+		PollId:     pollID,
+	})
+	if err != nil {
+		return Enquete{}, mapearErroGRPC(err)
+	}
+	return enqueteFromProto(resp), nil
+}
+
+// eventoGrupoFromProto traduz o GroupEvent do proto para o tipo EventoGrupo
+// do SDK -- ver proto/syncz/v1/syncz.proto (message GroupEvent) e
+// internal/transport/grpc/server_group_events.go (groupEventDetailParaProto/
+// groupEventViewParaProto, o inverso).
+func eventoGrupoFromProto(p *synczv1.GroupEvent) EventoGrupo {
+	return EventoGrupo{
+		EventoID:                p.GetEventId(),
+		InstanciaID:             p.GetInstanceId(),
+		GrupoJID:                p.GetGroupJid(),
+		Titulo:                  p.GetTitle(),
+		Descricao:               p.GetDescription(),
+		Inicio:                  parseUnixSeconds(p.GetStartTime()),
+		Fim:                     parseUnixSeconds(p.GetEndTime()),
+		LembreteAntecedencia:    time.Duration(p.GetReminderOffsetSec()) * time.Second,
+		LocalNome:               p.GetLocationName(),
+		LinkEntrada:             p.GetJoinLink(),
+		Cancelado:               p.GetIsCanceled(),
+		ChamadaAgendada:         p.GetIsScheduleCall(),
+		PermiteConvidadosExtras: p.GetExtraGuestsAllowed(),
+		CriadoEm:                parseUnixSeconds(p.GetCreatedAt()),
+		AtualizadoEm:            parseUnixSeconds(p.GetUpdatedAt()),
+	}
+}
+
+// stringParaEventResponseType traduz a string de resposta RSVP
+// (RespostaEventoGrupo* em syncz.go) para o enum do proto -- espelha
+// internal/transport/grpc/server_group_events.go (stringParaEventResponseType,
+// o mesmo mapeamento do lado servidor).
+func stringParaEventResponseType(s string) synczv1.EventResponseType {
+	switch s {
+	case RespostaEventoGrupoIndo:
+		return synczv1.EventResponseType_EVENT_RESPONSE_TYPE_GOING
+	case RespostaEventoGrupoNaoIndo:
+		return synczv1.EventResponseType_EVENT_RESPONSE_TYPE_NOT_GOING
+	case RespostaEventoGrupoTalvez:
+		return synczv1.EventResponseType_EVENT_RESPONSE_TYPE_MAYBE
+	default:
+		return synczv1.EventResponseType_EVENT_RESPONSE_TYPE_UNSPECIFIED
+	}
+}
+
+// eventResponseTypeParaString e' o inverso de stringParaEventResponseType.
+func eventResponseTypeParaString(t synczv1.EventResponseType) string {
+	switch t {
+	case synczv1.EventResponseType_EVENT_RESPONSE_TYPE_GOING:
+		return RespostaEventoGrupoIndo
+	case synczv1.EventResponseType_EVENT_RESPONSE_TYPE_NOT_GOING:
+		return RespostaEventoGrupoNaoIndo
+	case synczv1.EventResponseType_EVENT_RESPONSE_TYPE_MAYBE:
+		return RespostaEventoGrupoTalvez
+	default:
+		return ""
+	}
+}
+
+// CriarEventoGrupo: o proto TEM RPC equivalente -- CreateGroupEvent, com
+// wait/wait_timeout_ms iguais aos de CreateGroup/CreatePoll (task 559).
+func (c *clienteGRPC) CriarEventoGrupo(ctx context.Context, e EntradaCriarEventoGrupo) (EventoGrupo, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	var endTime int64
+	if !e.Fim.IsZero() {
+		endTime = e.Fim.Unix()
+	}
+
+	wait, timeoutMs := e.protoWait()
+	resp, err := c.cli.CreateGroupEvent(ctx, &synczv1.CreateGroupEventRequest{
+		InstanceId:         e.InstanciaID,
+		GroupJid:           e.GrupoJID,
+		Title:              e.Titulo,
+		Description:        e.Descricao,
+		StartTime:          e.Inicio.Unix(),
+		EndTime:            endTime,
+		ReminderOffsetSec:  int64(e.LembreteAntecedencia.Seconds()),
+		LocationName:       e.LocalNome,
+		JoinLink:           e.LinkEntrada,
+		IsScheduleCall:     e.ChamadaAgendada,
+		ExtraGuestsAllowed: e.PermiteConvidadosExtras,
+		EnsureReminder:     e.GarantirLembrete,
+		Wait:               wait,
+		WaitTimeoutMs:      timeoutMs,
+	})
+	if err != nil {
+		return EventoGrupo{}, mapearErroGRPC(err)
+	}
+	return eventoGrupoFromProto(resp), nil
+}
+
+// AtualizarEventoGrupo consome o RPC UpdateGroupEvent -- só os campos
+// ponteiro presentes em e são enviados (mesma convenção do REST).
+func (c *clienteGRPC) AtualizarEventoGrupo(ctx context.Context, e EntradaAtualizarEventoGrupo) (EventoGrupo, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	req := &synczv1.UpdateGroupEventRequest{
+		InstanceId:  e.InstanciaID,
+		EventId:     e.EventoID,
+		Title:       e.Titulo,
+		Description: e.Descricao,
+	}
+	if e.Inicio != nil {
+		st := e.Inicio.Unix()
+		req.StartTime = &st
+	}
+	if e.Fim != nil {
+		et := e.Fim.Unix()
+		req.EndTime = &et
+	}
+	if e.LembreteAntecedencia != nil {
+		ro := int64(e.LembreteAntecedencia.Seconds())
+		req.ReminderOffsetSec = &ro
+	}
+	req.LocationName = e.LocalNome
+	req.JoinLink = e.LinkEntrada
+	req.Wait, req.WaitTimeoutMs = e.protoWait()
+
+	resp, err := c.cli.UpdateGroupEvent(ctx, req)
+	if err != nil {
+		return EventoGrupo{}, mapearErroGRPC(err)
+	}
+	return eventoGrupoFromProto(resp), nil
+}
+
+// CancelarEventoGrupo consome o RPC CancelGroupEvent.
+func (c *clienteGRPC) CancelarEventoGrupo(ctx context.Context, e EntradaCancelarEventoGrupo) (EventoGrupo, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	wait, timeoutMs := e.protoWait()
+	resp, err := c.cli.CancelGroupEvent(ctx, &synczv1.CancelGroupEventRequest{
+		InstanceId:    e.InstanciaID,
+		EventId:       e.EventoID,
+		Wait:          wait,
+		WaitTimeoutMs: timeoutMs,
+	})
+	if err != nil {
+		return EventoGrupo{}, mapearErroGRPC(err)
+	}
+	return eventoGrupoFromProto(resp), nil
+}
+
+// ResponderEventoGrupo consome o RPC SendEventResponse.
+func (c *clienteGRPC) ResponderEventoGrupo(ctx context.Context, e EntradaResponderEventoGrupo) (RespostaEventoGrupo, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	wait, timeoutMs := e.protoWait()
+	resp, err := c.cli.SendEventResponse(ctx, &synczv1.SendEventResponseRequest{
+		InstanceId:      e.InstanciaID,
+		EventId:         e.EventoID,
+		Response:        stringParaEventResponseType(e.Resposta),
+		ExtraGuestCount: e.ConvidadosExtras,
+		Wait:            wait,
+		WaitTimeoutMs:   timeoutMs,
+	})
+	if err != nil {
+		return RespostaEventoGrupo{}, mapearErroGRPC(err)
+	}
+	return RespostaEventoGrupo{
+		EventoID:   resp.GetEventId(),
+		MensagemID: resp.GetMessageId(),
+		Resposta:   eventResponseTypeParaString(resp.GetResponse()),
+	}, nil
+}
+
 func (c *clienteGRPC) CriarGrupo(ctx context.Context, e EntradaGrupo) (Grupo, error) {
 	ctx, cancel := c.comPrazo(ctx)
 	defer cancel()

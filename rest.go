@@ -1,6 +1,7 @@
 package syncz
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -109,36 +110,44 @@ func (c *clienteREST) requisicao(ctx context.Context, metodo, path string, corpo
 	}
 
 	if resp.StatusCode >= 400 {
-		var prob erroProblemDetails
-		_ = json.Unmarshal(respBytes, &prob)
-
-		msg := prob.Detail
-		if msg == "" {
-			msg = prob.Title
-		}
-		if msg == "" {
-			msg = string(respBytes)
-		}
-
-		switch resp.StatusCode {
-		case http.StatusNotFound:
-			return nil, nil, novoErroAPI(ErrNaoEncontrado, msg)
-		case http.StatusBadRequest, http.StatusUnprocessableEntity:
-			return nil, nil, novoErroAPI(ErrInvalido, msg)
-		case http.StatusUnauthorized:
-			return nil, nil, novoErroAPI(ErrCredencial, msg)
-		case http.StatusForbidden:
-			return nil, nil, novoErroAPI(ErrSemPermissao, msg)
-		case http.StatusConflict, http.StatusPreconditionFailed:
-			return nil, nil, novoErroAPI(ErrConflito, msg)
-		case http.StatusTooManyRequests, http.StatusServiceUnavailable:
-			return nil, nil, novoErroAPI(ErrIndisponivel, msg)
-		default:
-			return nil, nil, novoErroAPI(fmt.Errorf("syncz: erro http %d", resp.StatusCode), msg)
-		}
+		return nil, nil, erroPorStatusHTTP(resp.StatusCode, respBytes)
 	}
 
 	return resp, respBytes, nil
+}
+
+// erroPorStatusHTTP traduz um status HTTP >= 400 e o corpo (problem+json ou
+// texto puro) num dos erros sentinela do SDK. Compartilhado por requisicao e
+// por AcompanharPareamento, que abre a conexão SSE por fora do helper
+// requisicao (precisa manter o corpo aberto em caso de sucesso).
+func erroPorStatusHTTP(status int, respBytes []byte) error {
+	var prob erroProblemDetails
+	_ = json.Unmarshal(respBytes, &prob)
+
+	msg := prob.Detail
+	if msg == "" {
+		msg = prob.Title
+	}
+	if msg == "" {
+		msg = string(respBytes)
+	}
+
+	switch status {
+	case http.StatusNotFound:
+		return novoErroAPI(ErrNaoEncontrado, msg)
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return novoErroAPI(ErrInvalido, msg)
+	case http.StatusUnauthorized:
+		return novoErroAPI(ErrCredencial, msg)
+	case http.StatusForbidden:
+		return novoErroAPI(ErrSemPermissao, msg)
+	case http.StatusConflict, http.StatusPreconditionFailed:
+		return novoErroAPI(ErrConflito, msg)
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return novoErroAPI(ErrIndisponivel, msg)
+	default:
+		return novoErroAPI(fmt.Errorf("syncz: erro http %d", status), msg)
+	}
 }
 
 func parseTimestamp(s string) time.Time {
@@ -147,6 +156,18 @@ func parseTimestamp(s string) time.Time {
 	}
 	t, _ := time.Parse(time.RFC3339, s)
 	return t
+}
+
+// parseUnixSeconds traduz um timestamp Unix em segundos (formato usado pelos
+// DTOs de enquete -- pollResp.CreatedAt, pollResultsResp.ComputedAt, ver
+// internal/transport/rest/dto.go) para time.Time, com a mesma convenção do
+// resto do SDK: zero-value quando o campo não veio preenchido (parseTimestamp
+// acima é a contraparte para os campos que o servidor manda em RFC3339).
+func parseUnixSeconds(sec int64) time.Time {
+	if sec == 0 {
+		return time.Time{}
+	}
+	return time.Unix(sec, 0).UTC()
 }
 
 func (c *clienteREST) CriarInstancia(ctx context.Context, e EntradaCriarInstancia) (Instancia, error) {
@@ -288,6 +309,51 @@ func (c *clienteREST) RevogarInstancia(ctx context.Context, id string) (Instanci
 	}, nil
 }
 
+// AtualizarEstadoDesejado consulta/atualiza via PATCH .../instances/{id} --
+// ver internal/transport/rest/instances.go (handleSetDesiredState) e dto.go
+// (setDesiredStateReq/instanceResp) para o formato real. estado aceita só
+// EstadoDesejadoConectado ("connected") ou EstadoDesejadoDesconectado
+// ("disconnected") -- qualquer outro valor o servidor rejeita com
+// ErrInvalido (internal/service/instances.go, SetDesiredState). Instância
+// inexistente devolve ErrNaoEncontrado (comparável via errors.Is), mesmo
+// padrão de erroPorStatusHTTP usado pelo resto do cliente REST.
+func (c *clienteREST) AtualizarEstadoDesejado(ctx context.Context, instanciaID, estado string) (Instancia, error) {
+	body := struct {
+		DesiredState string `json:"desired_state"`
+	}{DesiredState: estado}
+
+	path := "/api/v1/instances/" + url.PathEscape(instanciaID)
+	_, respBytes, err := c.requisicao(ctx, http.MethodPatch, path, body, "")
+	if err != nil {
+		return Instancia{}, err
+	}
+
+	var res struct {
+		ID           string `json:"id"`
+		TenantID     string `json:"tenant_id"`
+		Name         string `json:"name"`
+		Phone        string `json:"phone"`
+		Status       string `json:"status"`
+		DesiredState string `json:"desired_state"`
+		CreatedAt    string `json:"created_at"`
+		UpdatedAt    string `json:"updated_at"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return Instancia{}, fmt.Errorf("syncz: desserializar instancia: %w", err)
+	}
+
+	return Instancia{
+		ID:             res.ID,
+		TenantID:       res.TenantID,
+		Nome:           res.Name,
+		Telefone:       res.Phone,
+		Status:         res.Status,
+		EstadoDesejado: res.DesiredState,
+		CriadaEm:       parseTimestamp(res.CreatedAt),
+		AtualizadaEm:   parseTimestamp(res.UpdatedAt),
+	}, nil
+}
+
 func (c *clienteREST) NovoLinkWizard(ctx context.Context, instanciaID string) (LinkWizard, error) {
 	_, respBytes, err := c.requisicao(ctx, http.MethodPost, "/api/v1/instances/"+url.PathEscape(instanciaID)+"/wizard-link", nil, "")
 	if err != nil {
@@ -338,6 +404,261 @@ func (c *clienteREST) EstadoPareamento(ctx context.Context, instanciaID string) 
 		Pareado:  res.Paired,
 		Telefone: res.Phone,
 	}, nil
+}
+
+// AcompanharPareamento abre GET .../pairing/stream (SSE) e traduz cada evento
+// nomeado (event: qr|paired|expired -- ver internal/transport/rest/pairing_stream.go
+// e internal/transport/sse/stream.go, que é quem define o formato real de
+// fio: linha "event: <nome>", linha "data: <json>", linha em branco) num
+// EventoPareamento no canal devolvido. O parser é um bufio.Scanner simples de
+// propósito -- não há biblioteca de SSE no módulo, e este formato não precisa
+// de uma.
+func (c *clienteREST) AcompanharPareamento(ctx context.Context, instanciaID string) (<-chan EventoPareamento, error) {
+	u := c.baseURL + "/api/v1/instances/" + url.PathEscape(instanciaID) + "/pairing/stream"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("syncz: criar requisicao stream pareamento: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.chaveAPI)
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("syncz: erro de rede: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		respBytes, _ := io.ReadAll(resp.Body)
+		return nil, erroPorStatusHTTP(resp.StatusCode, respBytes)
+	}
+
+	eventos := make(chan EventoPareamento)
+	go lerStreamPareamento(ctx, resp.Body, eventos)
+	return eventos, nil
+}
+
+// sseBloco é um bloco bruto de evento SSE -- as linhas "event:"/"data:"
+// acumuladas até a linha em branco que fecha o bloco (formato de fio definido
+// por internal/transport/sse/stream.go: Stream.Send). Nome vem vazio para o
+// formato sem linha "event:" (usado por GET /events/stream); AcompanharPareamento
+// sempre recebe nome preenchido.
+type sseBloco struct {
+	nome  string
+	dados string
+}
+
+// lerBlocosSSE varre body linha a linha, entregando cada bloco completo a
+// processar, até o servidor fechar a conexão (fim normal) ou processar pedir
+// parada (devolvendo false -- ex.: ctx cancelado do lado do consumidor).
+// Compartilhado por AcompanharPareamento e AcompanharEventos: os dois
+// transmitem sobre text/event-stream com o mesmo formato de linha, só o
+// decodificador de cada bloco muda.
+//
+// erroDe, quando não nil, é chamado com o erro de rede real (conexão caindo
+// no meio da leitura) -- cancelamento de ctx (ctx.Err() != nil) não conta
+// como erro a reportar, mesma convenção do resto do SDK.
+func lerBlocosSSE(ctx context.Context, body io.ReadCloser, processar func(sseBloco) bool, erroDe func(error)) {
+	defer body.Close()
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 4096), 1<<20)
+
+	var eventName string
+	var dataLines []string
+
+	for scanner.Scan() {
+		linha := scanner.Text()
+		if linha == "" {
+			if eventName != "" || len(dataLines) > 0 {
+				bloco := sseBloco{nome: eventName, dados: strings.Join(dataLines, "\n")}
+				eventName, dataLines = "", nil
+				if !processar(bloco) {
+					return
+				}
+			}
+			continue
+		}
+		switch {
+		case strings.HasPrefix(linha, "event:"):
+			eventName = strings.TrimSpace(strings.TrimPrefix(linha, "event:"))
+		case strings.HasPrefix(linha, "data:"):
+			dataLines = append(dataLines, strings.TrimPrefix(strings.TrimPrefix(linha, "data:"), " "))
+		}
+	}
+
+	if err := scanner.Err(); err != nil && ctx.Err() == nil && erroDe != nil {
+		erroDe(err)
+	}
+}
+
+// lerStreamPareamento consome o corpo SSE do stream de pareamento até o
+// servidor fechar a conexão (fim normal, sem erro no canal) ou ctx ser
+// cancelado (idem: cancelamento não é uma falha a reportar). Erro de rede
+// real -- conexão caindo no meio -- vira o último EventoPareamento antes do
+// fechamento.
+func lerStreamPareamento(ctx context.Context, body io.ReadCloser, eventos chan<- EventoPareamento) {
+	defer close(eventos)
+
+	enviar := func(ev EventoPareamento) bool {
+		select {
+		case eventos <- ev:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	lerBlocosSSE(ctx, body, func(b sseBloco) bool {
+		ev, ok := decodificarEventoPareamento(b.nome, b.dados)
+		if !ok {
+			return true
+		}
+		return enviar(ev)
+	}, func(err error) {
+		enviar(EventoPareamento{Err: fmt.Errorf("syncz: stream pareamento: %w", err)})
+	})
+}
+
+// decodificarEventoPareamento traduz um bloco "event: <nome>" + "data: <json>"
+// no EventoPareamento correspondente. ok=false descarta o bloco (nome
+// desconhecido/vazio, ex. comentário de keep-alive) sem gerar evento.
+func decodificarEventoPareamento(nome, data string) (EventoPareamento, bool) {
+	switch nome {
+	case "qr":
+		var dto struct {
+			QRCode    string `json:"qr_code"`
+			PairCode  string `json:"pair_code"`
+			Seq       int    `json:"seq"`
+			ExpiresAt string `json:"expires_at"`
+		}
+		if err := json.Unmarshal([]byte(data), &dto); err != nil {
+			return EventoPareamento{Err: fmt.Errorf("syncz: desserializar evento qr: %w", err)}, true
+		}
+		return EventoPareamento{Estado: Pareamento{
+			QRCode:   dto.QRCode,
+			PairCode: dto.PairCode,
+			Seq:      dto.Seq,
+			ExpiraEm: parseTimestamp(dto.ExpiresAt),
+		}}, true
+	case "paired":
+		var dto struct {
+			Phone string `json:"phone"`
+		}
+		if err := json.Unmarshal([]byte(data), &dto); err != nil {
+			return EventoPareamento{Err: fmt.Errorf("syncz: desserializar evento paired: %w", err)}, true
+		}
+		return EventoPareamento{Estado: Pareamento{Pareado: true, Telefone: dto.Phone}}, true
+	case "expired":
+		return EventoPareamento{Err: ErrPareamentoExpirado}, true
+	default:
+		return EventoPareamento{}, false
+	}
+}
+
+// AcompanharEventos abre GET .../events/stream (SSE) e traduz cada bloco
+// "data: <json>" (sem "event:" -- ver internal/transport/sse/stream.go,
+// Stream.Send com name="") num EventoStream no canal devolvido. instanciaID é
+// obrigatório (erro sem chamada de rede se vazio, mesma validação que o
+// servidor faz em parseInstanceIDs -- falhar cedo evita uma requisição que já
+// sabemos que volta 400). fromSeq <= 0 omite o parâmetro da query (replay
+// completo); ver a documentação de ClienteEventosStream em syncz.go sobre o
+// servidor fazer só catch-up, sem tail ao vivo.
+func (c *clienteREST) AcompanharEventos(ctx context.Context, instanciaID string, fromSeq int64) (<-chan EventoStream, error) {
+	if strings.TrimSpace(instanciaID) == "" {
+		return nil, novoErroAPI(ErrInvalido, "instance_id obrigatorio")
+	}
+
+	q := url.Values{}
+	q.Set("instance_id", instanciaID)
+	if fromSeq > 0 {
+		q.Set("from_seq", strconv.FormatInt(fromSeq, 10))
+	}
+	u := c.baseURL + "/api/v1/events/stream?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("syncz: criar requisicao stream eventos: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.chaveAPI)
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("syncz: erro de rede: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		respBytes, _ := io.ReadAll(resp.Body)
+		return nil, erroPorStatusHTTP(resp.StatusCode, respBytes)
+	}
+
+	eventos := make(chan EventoStream)
+	go lerStreamEventos(ctx, resp.Body, eventos)
+	return eventos, nil
+}
+
+// lerStreamEventos consome o corpo SSE do stream de eventos até o servidor
+// terminar o catch-up e fechar a conexão (fim normal, sem erro no canal) ou
+// ctx ser cancelado. Erro de rede real -- conexão caindo no meio -- vira o
+// último EventoStream antes do fechamento.
+func lerStreamEventos(ctx context.Context, body io.ReadCloser, eventos chan<- EventoStream) {
+	defer close(eventos)
+
+	enviar := func(ev EventoStream) bool {
+		select {
+		case eventos <- ev:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	lerBlocosSSE(ctx, body, func(b sseBloco) bool {
+		ev, ok := decodificarEventoStream(b.dados)
+		if !ok {
+			return true
+		}
+		return enviar(ev)
+	}, func(err error) {
+		enviar(EventoStream{Err: fmt.Errorf("syncz: stream eventos: %w", err)})
+	})
+}
+
+// decodificarEventoStream traduz o "data:" de um bloco no EventoStream
+// correspondente -- DTO espelha internal/core.Event (json.Marshal direto,
+// ver internal/transport/sse/stream.go loadCatchUpJSON). ok=false descarta o
+// bloco (data vazio, ex. comentário de keep-alive) sem gerar evento.
+func decodificarEventoStream(data string) (EventoStream, bool) {
+	if strings.TrimSpace(data) == "" {
+		return EventoStream{}, false
+	}
+
+	var dto struct {
+		ID         string          `json:"id"`
+		Type       string          `json:"type"`
+		InstanceID string          `json:"instance_id"`
+		ChatJID    string          `json:"chat_jid"`
+		Seq        int64           `json:"seq"`
+		OccurredAt string          `json:"occurred_at"`
+		Payload    json.RawMessage `json:"payload"`
+		TraceID    string          `json:"trace_id"`
+	}
+	if err := json.Unmarshal([]byte(data), &dto); err != nil {
+		return EventoStream{Err: fmt.Errorf("syncz: desserializar evento: %w", err)}, true
+	}
+
+	return EventoStream{Evento: Evento{
+		ID:          dto.ID,
+		Tipo:        dto.Type,
+		InstanciaID: dto.InstanceID,
+		ChatJID:     dto.ChatJID,
+		Seq:         dto.Seq,
+		OcorridoEm:  parseTimestamp(dto.OccurredAt),
+		Payload:     dto.Payload,
+		TraceID:     dto.TraceID,
+	}}, true
 }
 
 func (c *clienteREST) Contrato(ctx context.Context, instanciaID string) (ContratoInfo, error) {
@@ -534,6 +855,352 @@ func (c *clienteREST) EnviarMidia(ctx context.Context, e EntradaEnvioMidia) (Rec
 		Status:     res.Status,
 		EnviadoEm:  time.Now().UTC(),
 		Duplicada:  duplicada,
+	}, nil
+}
+
+// StatusMensagem consulta GET .../messages/{message_id} -- ver
+// internal/transport/rest/messages.go (handleGetMessageStatus/messageStatusResp)
+// para o formato de resposta real. Campos opcionais (wa_message_id, error_code,
+// error_message, sent_at, delivered_at, read_at) vêm ausentes/zero quando a
+// mensagem ainda não passou por aquele estágio.
+func (c *clienteREST) StatusMensagem(ctx context.Context, instanciaID, mensagemID string) (EstadoMensagem, error) {
+	path := "/api/v1/instances/" + url.PathEscape(instanciaID) + "/messages/" + url.PathEscape(mensagemID)
+	_, respBytes, err := c.requisicao(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return EstadoMensagem{}, err
+	}
+
+	var res struct {
+		MessageID    string `json:"message_id"`
+		Status       string `json:"status"`
+		WAMessageID  string `json:"wa_message_id"`
+		ErrorCode    string `json:"error_code"`
+		ErrorMessage string `json:"error_message"`
+		SendAttempts int    `json:"send_attempts"`
+		QueuedAt     string `json:"queued_at"`
+		SentAt       string `json:"sent_at"`
+		DeliveredAt  string `json:"delivered_at"`
+		ReadAt       string `json:"read_at"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return EstadoMensagem{}, fmt.Errorf("syncz: desserializar status mensagem: %w", err)
+	}
+
+	return EstadoMensagem{
+		MensagemID:    res.MessageID,
+		Status:        res.Status,
+		WAMensagemID:  res.WAMessageID,
+		ErrorCode:     res.ErrorCode,
+		ErrorMessage:  res.ErrorMessage,
+		Tentativas:    res.SendAttempts,
+		EnfileiradaEm: parseTimestamp(res.QueuedAt),
+		EnviadaEm:     parseTimestamp(res.SentAt),
+		EntregueEm:    parseTimestamp(res.DeliveredAt),
+		LidaEm:        parseTimestamp(res.ReadAt),
+	}, nil
+}
+
+// StatusOperacao consulta GET .../operations/{op_id} -- ver
+// internal/transport/rest/operations.go (handleGetOperation/operationResp)
+// para o formato de resposta real. Result vem cru (json.RawMessage): o
+// formato depende de qual operação é (create_group, update_group_name, ...).
+func (c *clienteREST) StatusOperacao(ctx context.Context, instanciaID, opID string) (EstadoOperacao, error) {
+	path := "/api/v1/instances/" + url.PathEscape(instanciaID) + "/operations/" + url.PathEscape(opID)
+	_, respBytes, err := c.requisicao(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return EstadoOperacao{}, err
+	}
+
+	var res struct {
+		OpID       string          `json:"op_id"`
+		Operation  string          `json:"operation"`
+		Status     string          `json:"status"`
+		Result     json.RawMessage `json:"result"`
+		Error      string          `json:"error"`
+		CreatedAt  string          `json:"created_at"`
+		FinishedAt string          `json:"finished_at"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return EstadoOperacao{}, fmt.Errorf("syncz: desserializar status operacao: %w", err)
+	}
+
+	return EstadoOperacao{
+		OpID:         res.OpID,
+		Operacao:     res.Operation,
+		Status:       res.Status,
+		Result:       res.Result,
+		Erro:         res.Error,
+		CriadaEm:     parseTimestamp(res.CreatedAt),
+		FinalizadaEm: parseTimestamp(res.FinishedAt),
+	}, nil
+}
+
+// pollResp é o formato comum das respostas de criar/encerrar enquete -- ver
+// internal/transport/rest/dto.go (pollResp) e polls.go (toPollResp).
+type pollResp struct {
+	PollID          string   `json:"poll_id"`
+	InstanceID      string   `json:"instance_id"`
+	GroupJID        string   `json:"group_jid"`
+	Question        string   `json:"question"`
+	Options         []string `json:"options"`
+	SelectableCount int      `json:"selectable_count"`
+	IsClosed        bool     `json:"is_closed"`
+	CreatedAt       int64    `json:"created_at"`
+}
+
+func enqueteFromResp(res pollResp) Enquete {
+	return Enquete{
+		PollID:        res.PollID,
+		InstanciaID:   res.InstanceID,
+		GrupoJID:      res.GroupJID,
+		Pergunta:      res.Question,
+		Opcoes:        res.Options,
+		Selecionaveis: res.SelectableCount,
+		Encerrada:     res.IsClosed,
+		CriadaEm:      parseUnixSeconds(res.CreatedAt),
+	}
+}
+
+// CriarEnquete consulta POST .../polls -- ver internal/transport/rest/polls.go
+// (handleCreatePoll). Suporta ?wait= igual a CriarGrupo: o servidor só tem
+// caminho assíncrono quando a instância não tem provider local (task 559).
+func (c *clienteREST) CriarEnquete(ctx context.Context, e EntradaCriarEnquete) (Enquete, error) {
+	corpo := map[string]any{
+		"group_jid":        e.GrupoJID,
+		"question":         e.Pergunta,
+		"options":          e.Opcoes,
+		"selectable_count": e.Selecionaveis,
+	}
+	path := comWaitQuery("/api/v1/instances/"+url.PathEscape(e.InstanciaID)+"/polls", e.EsperaSincrona)
+	_, respBytes, err := c.requisicao(ctx, http.MethodPost, path, corpo, "")
+	if err != nil {
+		return Enquete{}, err
+	}
+
+	var res pollResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return Enquete{}, fmt.Errorf("syncz: desserializar enquete: %w", err)
+	}
+	return enqueteFromResp(res), nil
+}
+
+// ResultadoEnquete consulta GET .../polls/{poll_id}/results -- ver
+// internal/transport/rest/polls.go (handleGetPollResults/toPollResultsResp).
+func (c *clienteREST) ResultadoEnquete(ctx context.Context, instanciaID, pollID string) (EnqueteResultado, error) {
+	path := "/api/v1/instances/" + url.PathEscape(instanciaID) + "/polls/" + url.PathEscape(pollID) + "/results"
+	_, respBytes, err := c.requisicao(ctx, http.MethodGet, path, nil, "")
+	if err != nil {
+		return EnqueteResultado{}, err
+	}
+
+	var res struct {
+		PollID  string `json:"poll_id"`
+		Tallies []struct {
+			Option string   `json:"option"`
+			Count  int      `json:"count"`
+			Voters []string `json:"voters"`
+		} `json:"tallies"`
+		TotalVoters int   `json:"total_voters"`
+		ComputedAt  int64 `json:"computed_at"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return EnqueteResultado{}, fmt.Errorf("syncz: desserializar resultado de enquete: %w", err)
+	}
+
+	opcoes := make([]EnqueteOpcaoResultado, len(res.Tallies))
+	for i, t := range res.Tallies {
+		opcoes[i] = EnqueteOpcaoResultado{
+			Opcao:    t.Option,
+			Votos:    t.Count,
+			Votantes: t.Voters,
+		}
+	}
+	return EnqueteResultado{
+		PollID:        res.PollID,
+		Opcoes:        opcoes,
+		TotalVotantes: res.TotalVoters,
+		CalculadoEm:   parseUnixSeconds(res.ComputedAt),
+	}, nil
+}
+
+// EncerrarEnquete consulta POST .../polls/{poll_id}/close -- ver
+// internal/transport/rest/polls.go (handleClosePoll). Sem EsperaSincrona:
+// fechar é sempre local ao servidor (marca is_closed no banco), sem caminho
+// assíncrono via provider (mesmo motivo de EntradaLinkConvite não ter).
+func (c *clienteREST) EncerrarEnquete(ctx context.Context, instanciaID, pollID string) (Enquete, error) {
+	path := "/api/v1/instances/" + url.PathEscape(instanciaID) + "/polls/" + url.PathEscape(pollID) + "/close"
+	_, respBytes, err := c.requisicao(ctx, http.MethodPost, path, nil, "")
+	if err != nil {
+		return Enquete{}, err
+	}
+
+	var res pollResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return Enquete{}, fmt.Errorf("syncz: desserializar enquete: %w", err)
+	}
+	return enqueteFromResp(res), nil
+}
+
+// groupEventResp é o formato comum das respostas de evento de grupo -- ver
+// internal/transport/rest/dto.go (groupEventResp) e group_events.go
+// (toGroupEventResp).
+type groupEventResp struct {
+	EventID            string `json:"event_id"`
+	InstanceID         string `json:"instance_id"`
+	GroupJID           string `json:"group_jid"`
+	Title              string `json:"title"`
+	Description        string `json:"description"`
+	StartTime          int64  `json:"start_time"`
+	EndTime            int64  `json:"end_time"`
+	ReminderOffsetSec  int64  `json:"reminder_offset_sec"`
+	LocationName       string `json:"location_name"`
+	JoinLink           string `json:"join_link"`
+	IsCanceled         bool   `json:"is_canceled"`
+	ExtraGuestsAllowed bool   `json:"extra_guests_allowed"`
+	IsScheduleCall     bool   `json:"is_schedule_call"`
+	CreatedAt          int64  `json:"created_at"`
+	UpdatedAt          int64  `json:"updated_at"`
+}
+
+func eventoGrupoFromResp(res groupEventResp) EventoGrupo {
+	return EventoGrupo{
+		EventoID:                res.EventID,
+		InstanciaID:             res.InstanceID,
+		GrupoJID:                res.GroupJID,
+		Titulo:                  res.Title,
+		Descricao:               res.Description,
+		Inicio:                  parseUnixSeconds(res.StartTime),
+		Fim:                     parseUnixSeconds(res.EndTime),
+		LembreteAntecedencia:    time.Duration(res.ReminderOffsetSec) * time.Second,
+		LocalNome:               res.LocationName,
+		LinkEntrada:             res.JoinLink,
+		Cancelado:               res.IsCanceled,
+		ChamadaAgendada:         res.IsScheduleCall,
+		PermiteConvidadosExtras: res.ExtraGuestsAllowed,
+		CriadoEm:                parseUnixSeconds(res.CreatedAt),
+		AtualizadoEm:            parseUnixSeconds(res.UpdatedAt),
+	}
+}
+
+// CriarEventoGrupo consulta POST .../group-events -- ver
+// internal/transport/rest/group_events.go (handleCreateGroupEvent). Suporta
+// ?wait= igual a CriarGrupo/CriarEnquete: o servidor só tem caminho
+// assíncrono quando a instância não tem provider local (task 559).
+func (c *clienteREST) CriarEventoGrupo(ctx context.Context, e EntradaCriarEventoGrupo) (EventoGrupo, error) {
+	corpo := map[string]any{
+		"group_jid":            e.GrupoJID,
+		"title":                e.Titulo,
+		"description":          e.Descricao,
+		"start_time":           strconv.FormatInt(e.Inicio.Unix(), 10),
+		"reminder_offset_sec":  int64(e.LembreteAntecedencia.Seconds()),
+		"location_name":        e.LocalNome,
+		"join_link":            e.LinkEntrada,
+		"is_schedule_call":     e.ChamadaAgendada,
+		"extra_guests_allowed": e.PermiteConvidadosExtras,
+	}
+	if !e.Fim.IsZero() {
+		corpo["end_time"] = strconv.FormatInt(e.Fim.Unix(), 10)
+	}
+	if e.GarantirLembrete != nil {
+		corpo["ensure_reminder"] = *e.GarantirLembrete
+	}
+
+	path := comWaitQuery("/api/v1/instances/"+url.PathEscape(e.InstanciaID)+"/group-events", e.EsperaSincrona)
+	_, respBytes, err := c.requisicao(ctx, http.MethodPost, path, corpo, "")
+	if err != nil {
+		return EventoGrupo{}, err
+	}
+
+	var res groupEventResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return EventoGrupo{}, fmt.Errorf("syncz: desserializar evento de grupo: %w", err)
+	}
+	return eventoGrupoFromResp(res), nil
+}
+
+// AtualizarEventoGrupo consulta PATCH .../group-events/{event_id} -- ver
+// internal/transport/rest/group_events.go (handleUpdateGroupEvent). Só os
+// campos ponteiro presentes em e são enviados; os demais ficam como estão no
+// servidor.
+func (c *clienteREST) AtualizarEventoGrupo(ctx context.Context, e EntradaAtualizarEventoGrupo) (EventoGrupo, error) {
+	corpo := map[string]any{}
+	if e.Titulo != nil {
+		corpo["title"] = *e.Titulo
+	}
+	if e.Descricao != nil {
+		corpo["description"] = *e.Descricao
+	}
+	if e.Inicio != nil {
+		corpo["start_time"] = strconv.FormatInt(e.Inicio.Unix(), 10)
+	}
+	if e.Fim != nil {
+		corpo["end_time"] = strconv.FormatInt(e.Fim.Unix(), 10)
+	}
+	if e.LembreteAntecedencia != nil {
+		corpo["reminder_offset_sec"] = int64(e.LembreteAntecedencia.Seconds())
+	}
+	if e.LocalNome != nil {
+		corpo["location_name"] = *e.LocalNome
+	}
+	if e.LinkEntrada != nil {
+		corpo["join_link"] = *e.LinkEntrada
+	}
+
+	path := comWaitQuery(fmt.Sprintf("/api/v1/instances/%s/group-events/%s", url.PathEscape(e.InstanciaID), url.PathEscape(e.EventoID)), e.EsperaSincrona)
+	_, respBytes, err := c.requisicao(ctx, http.MethodPatch, path, corpo, "")
+	if err != nil {
+		return EventoGrupo{}, err
+	}
+
+	var res groupEventResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return EventoGrupo{}, fmt.Errorf("syncz: desserializar evento de grupo atualizado: %w", err)
+	}
+	return eventoGrupoFromResp(res), nil
+}
+
+// CancelarEventoGrupo consulta POST .../group-events/{event_id}/cancel -- ver
+// internal/transport/rest/group_events.go (handleCancelGroupEvent). Cancelar
+// duas vezes é idempotente (mesmo comportamento do servidor).
+func (c *clienteREST) CancelarEventoGrupo(ctx context.Context, e EntradaCancelarEventoGrupo) (EventoGrupo, error) {
+	path := comWaitQuery(fmt.Sprintf("/api/v1/instances/%s/group-events/%s/cancel", url.PathEscape(e.InstanciaID), url.PathEscape(e.EventoID)), e.EsperaSincrona)
+	_, respBytes, err := c.requisicao(ctx, http.MethodPost, path, nil, "")
+	if err != nil {
+		return EventoGrupo{}, err
+	}
+
+	var res groupEventResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return EventoGrupo{}, fmt.Errorf("syncz: desserializar evento de grupo cancelado: %w", err)
+	}
+	return eventoGrupoFromResp(res), nil
+}
+
+// ResponderEventoGrupo consulta POST .../group-events/{event_id}/response --
+// ver internal/transport/rest/group_events.go (handleSendEventResponse).
+func (c *clienteREST) ResponderEventoGrupo(ctx context.Context, e EntradaResponderEventoGrupo) (RespostaEventoGrupo, error) {
+	corpo := map[string]any{
+		"response":          e.Resposta,
+		"extra_guest_count": e.ConvidadosExtras,
+	}
+	path := comWaitQuery(fmt.Sprintf("/api/v1/instances/%s/group-events/%s/response", url.PathEscape(e.InstanciaID), url.PathEscape(e.EventoID)), e.EsperaSincrona)
+	_, respBytes, err := c.requisicao(ctx, http.MethodPost, path, corpo, "")
+	if err != nil {
+		return RespostaEventoGrupo{}, err
+	}
+
+	var res struct {
+		EventID   string `json:"event_id"`
+		MessageID string `json:"message_id"`
+		Response  string `json:"response"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return RespostaEventoGrupo{}, fmt.Errorf("syncz: desserializar resposta de evento de grupo: %w", err)
+	}
+	return RespostaEventoGrupo{
+		EventoID:   res.EventID,
+		MensagemID: res.MessageID,
+		Resposta:   res.Response,
 	}, nil
 }
 

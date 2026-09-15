@@ -2,6 +2,7 @@ package syncz
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -23,6 +24,8 @@ type sandboxCliente struct {
 	instancias    map[string]*Instancia
 	recibos       map[string]Recibo
 	conteudoMsg   map[string]string
+	statusMsg     map[string]EstadoMensagem
+	operacoes     map[string]EstadoOperacao
 	enviadas      []EntradaEnvio
 	enviadasMidia []EntradaEnvioMidia
 	grupos        map[string]*Grupo
@@ -31,9 +34,14 @@ type sandboxCliente struct {
 	pareamentos   map[string]*Pareamento
 	contratos     map[string]*ContratoInfo
 	politicas     map[string][]byte
+	enquetes      map[string]*Enquete
+	eventosGrupo  map[string]*EventoGrupo
 	proximoErro   error
 	seqMsg        int
 	seqInst       int
+	seqOp         int
+	seqEnquete    int
+	seqEvento     int
 }
 
 // NovoSandbox cria uma instância em memória do Cliente sync-zap (Dublê).
@@ -42,12 +50,16 @@ func NovoSandbox() SandboxCliente {
 		instancias:   make(map[string]*Instancia),
 		recibos:      make(map[string]Recibo),
 		conteudoMsg:  make(map[string]string),
+		statusMsg:    make(map[string]EstadoMensagem),
+		operacoes:    make(map[string]EstadoOperacao),
 		grupos:       make(map[string]*Grupo),
 		fotosGrupo:   make(map[string][]byte),
 		linksConvite: make(map[string]string),
 		pareamentos:  make(map[string]*Pareamento),
 		contratos:    make(map[string]*ContratoInfo),
 		politicas:    make(map[string][]byte),
+		enquetes:     make(map[string]*Enquete),
+		eventosGrupo: make(map[string]*EventoGrupo),
 	}
 }
 
@@ -202,6 +214,38 @@ func (s *sandboxCliente) RevogarInstancia(_ context.Context, id string) (Instanc
 	return *inst, nil
 }
 
+// AtualizarEstadoDesejado simula PATCH .../instances/{id}: grava
+// EstadoDesejado e, ao desconectar uma instância "connected", também rebate
+// Status para "disconnected" -- mesmo efeito colateral que
+// internal/service/instances.go (applyDesiredState) tem no servidor real
+// (desconexão de instância conectada dispara EventConnectionLost). Estado
+// fora de EstadoDesejadoConectado/EstadoDesejadoDesconectado devolve
+// ErrInvalido, mesma validação do servidor (SetDesiredState).
+func (s *sandboxCliente) AtualizarEstadoDesejado(_ context.Context, instanciaID, estado string) (Instancia, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return Instancia{}, err
+	}
+
+	if estado != EstadoDesejadoConectado && estado != EstadoDesejadoDesconectado {
+		return Instancia{}, novoErroAPI(ErrInvalido, "estado invalido, esperado 'connected' ou 'disconnected'")
+	}
+
+	inst, ok := s.instancias[instanciaID]
+	if !ok {
+		return Instancia{}, novoErroAPI(ErrNaoEncontrado, "instancia nao encontrada")
+	}
+
+	inst.EstadoDesejado = estado
+	if estado == EstadoDesejadoDesconectado && inst.Status == "connected" {
+		inst.Status = "disconnected"
+	}
+	inst.AtualizadaEm = time.Now().UTC()
+	return *inst, nil
+}
+
 func (s *sandboxCliente) NovoLinkWizard(_ context.Context, instanciaID string) (LinkWizard, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -327,6 +371,15 @@ func (s *sandboxCliente) Enviar(_ context.Context, e EntradaEnvio) (Recibo, erro
 	s.recibos[e.ChaveIdempotencia] = rec
 	s.conteudoMsg[e.ChaveIdempotencia] = e.Texto
 	s.enviadas = append(s.enviadas, e)
+	s.statusMsg[msgID] = EstadoMensagem{
+		MensagemID:    msgID,
+		Status:        rec.Status,
+		WAMensagemID:  "wa-" + msgID,
+		Tentativas:    1,
+		EnfileiradaEm: rec.EnviadoEm,
+		EnviadaEm:     rec.EnviadoEm,
+		EntregueEm:    rec.EnviadoEm,
+	}
 
 	return rec, nil
 }
@@ -359,8 +412,267 @@ func (s *sandboxCliente) EnviarMidia(_ context.Context, e EntradaEnvioMidia) (Re
 
 	s.recibos[e.ChaveIdempotencia] = rec
 	s.enviadasMidia = append(s.enviadasMidia, e)
+	s.statusMsg[msgID] = EstadoMensagem{
+		MensagemID:    msgID,
+		Status:        rec.Status,
+		WAMensagemID:  "wa-" + msgID,
+		Tentativas:    1,
+		EnfileiradaEm: rec.EnviadoEm,
+		EnviadaEm:     rec.EnviadoEm,
+		EntregueEm:    rec.EnviadoEm,
+	}
 
 	return rec, nil
+}
+
+func (s *sandboxCliente) StatusMensagem(_ context.Context, _ string, mensagemID string) (EstadoMensagem, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return EstadoMensagem{}, err
+	}
+
+	st, ok := s.statusMsg[mensagemID]
+	if !ok {
+		return EstadoMensagem{}, novoErroAPI(ErrNaoEncontrado, "mensagem nao encontrada")
+	}
+	return st, nil
+}
+
+func (s *sandboxCliente) StatusOperacao(_ context.Context, _ string, opID string) (EstadoOperacao, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return EstadoOperacao{}, err
+	}
+
+	op, ok := s.operacoes[opID]
+	if !ok {
+		return EstadoOperacao{}, novoErroAPI(ErrNaoEncontrado, "operacao nao encontrada")
+	}
+	return op, nil
+}
+
+// CriarEnquete cria uma enquete fake em memória -- mesma validação mínima do
+// servidor real (group_jid, 2..12 opções, ver internal/service/polls.go
+// Polls.validar), sem tocar rede nenhuma.
+func (s *sandboxCliente) CriarEnquete(_ context.Context, e EntradaCriarEnquete) (Enquete, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return Enquete{}, err
+	}
+
+	if e.GrupoJID == "" {
+		return Enquete{}, novoErroAPI(ErrInvalido, "group_jid obrigatorio")
+	}
+	if len(e.Opcoes) < 2 || len(e.Opcoes) > 12 {
+		return Enquete{}, novoErroAPI(ErrInvalido, "options exige 2..12 itens")
+	}
+
+	selecionaveis := e.Selecionaveis
+	if selecionaveis == 0 {
+		selecionaveis = 1
+	}
+
+	s.seqEnquete++
+	enq := &Enquete{
+		PollID:        fmt.Sprintf("poll-sbx-%d", s.seqEnquete),
+		InstanciaID:   e.InstanciaID,
+		GrupoJID:      e.GrupoJID,
+		Pergunta:      e.Pergunta,
+		Opcoes:        append([]string(nil), e.Opcoes...),
+		Selecionaveis: selecionaveis,
+		CriadaEm:      time.Now().UTC(),
+	}
+	s.enquetes[enq.PollID] = enq
+	return *enq, nil
+}
+
+// ResultadoEnquete devolve o tally da enquete fake -- como o Dublê não expõe
+// um método para votar (Cliente não tem esse RPC, ver EnqueteResultado em
+// syncz.go), o tally sempre vem zerado por opção: cobre o contrato (mesma
+// ordem de Opcoes, TotalVotantes) sem fingir um voto que ninguém deu.
+func (s *sandboxCliente) ResultadoEnquete(_ context.Context, _ string, pollID string) (EnqueteResultado, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return EnqueteResultado{}, err
+	}
+
+	enq, ok := s.enquetes[pollID]
+	if !ok {
+		return EnqueteResultado{}, novoErroAPI(ErrNaoEncontrado, "enquete nao encontrada")
+	}
+
+	opcoes := make([]EnqueteOpcaoResultado, len(enq.Opcoes))
+	for i, opt := range enq.Opcoes {
+		opcoes[i] = EnqueteOpcaoResultado{Opcao: opt, Votantes: []string{}}
+	}
+	return EnqueteResultado{
+		PollID:      pollID,
+		Opcoes:      opcoes,
+		CalculadoEm: time.Now().UTC(),
+	}, nil
+}
+
+// EncerrarEnquete marca a enquete fake como encerrada.
+func (s *sandboxCliente) EncerrarEnquete(_ context.Context, _ string, pollID string) (Enquete, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return Enquete{}, err
+	}
+
+	enq, ok := s.enquetes[pollID]
+	if !ok {
+		return Enquete{}, novoErroAPI(ErrNaoEncontrado, "enquete nao encontrada")
+	}
+	enq.Encerrada = true
+	return *enq, nil
+}
+
+// CriarEventoGrupo cria um evento de grupo fake em memória -- mesma validação
+// mínima do servidor real (group_jid e title obrigatórios, ver
+// internal/service/group_events.go validarCreateGroupEvent), sem tocar rede
+// nenhuma.
+func (s *sandboxCliente) CriarEventoGrupo(_ context.Context, e EntradaCriarEventoGrupo) (EventoGrupo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return EventoGrupo{}, err
+	}
+
+	if e.GrupoJID == "" {
+		return EventoGrupo{}, novoErroAPI(ErrInvalido, "group_jid obrigatorio")
+	}
+	if e.Titulo == "" {
+		return EventoGrupo{}, novoErroAPI(ErrInvalido, "title obrigatorio")
+	}
+
+	s.seqEvento++
+	agora := time.Now().UTC()
+	ev := &EventoGrupo{
+		EventoID:                fmt.Sprintf("evt-sbx-%d", s.seqEvento),
+		InstanciaID:             e.InstanciaID,
+		GrupoJID:                e.GrupoJID,
+		Titulo:                  e.Titulo,
+		Descricao:               e.Descricao,
+		Inicio:                  e.Inicio,
+		Fim:                     e.Fim,
+		LembreteAntecedencia:    e.LembreteAntecedencia,
+		LocalNome:               e.LocalNome,
+		LinkEntrada:             e.LinkEntrada,
+		ChamadaAgendada:         e.ChamadaAgendada,
+		PermiteConvidadosExtras: e.PermiteConvidadosExtras,
+		CriadoEm:                agora,
+		AtualizadoEm:            agora,
+	}
+	s.eventosGrupo[ev.EventoID] = ev
+	return *ev, nil
+}
+
+// AtualizarEventoGrupo altera o evento fake em memória -- só os campos
+// ponteiro presentes em e são aplicados, mesma convenção dos transportes
+// reais.
+func (s *sandboxCliente) AtualizarEventoGrupo(_ context.Context, e EntradaAtualizarEventoGrupo) (EventoGrupo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return EventoGrupo{}, err
+	}
+
+	ev, ok := s.eventosGrupo[e.EventoID]
+	if !ok {
+		return EventoGrupo{}, novoErroAPI(ErrNaoEncontrado, "evento de grupo nao encontrado")
+	}
+
+	if e.Titulo != nil {
+		ev.Titulo = *e.Titulo
+	}
+	if e.Descricao != nil {
+		ev.Descricao = *e.Descricao
+	}
+	if e.Inicio != nil {
+		ev.Inicio = *e.Inicio
+	}
+	if e.Fim != nil {
+		ev.Fim = *e.Fim
+	}
+	if e.LembreteAntecedencia != nil {
+		ev.LembreteAntecedencia = *e.LembreteAntecedencia
+	}
+	if e.LocalNome != nil {
+		ev.LocalNome = *e.LocalNome
+	}
+	if e.LinkEntrada != nil {
+		ev.LinkEntrada = *e.LinkEntrada
+	}
+	ev.AtualizadoEm = time.Now().UTC()
+
+	return *ev, nil
+}
+
+// CancelarEventoGrupo marca o evento fake como cancelado -- idempotente,
+// mesmo comportamento do servidor real.
+func (s *sandboxCliente) CancelarEventoGrupo(_ context.Context, e EntradaCancelarEventoGrupo) (EventoGrupo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return EventoGrupo{}, err
+	}
+
+	ev, ok := s.eventosGrupo[e.EventoID]
+	if !ok {
+		return EventoGrupo{}, novoErroAPI(ErrNaoEncontrado, "evento de grupo nao encontrado")
+	}
+	ev.Cancelado = true
+	ev.AtualizadoEm = time.Now().UTC()
+	return *ev, nil
+}
+
+// ResponderEventoGrupo simula o RSVP a um evento de grupo fake -- não
+// mantém lista de votantes/confirmados (o Dublê não expõe leitura disso, mesmo
+// espírito de ResultadoEnquete não fingir votos que ninguém deu), só valida e
+// devolve o recibo.
+func (s *sandboxCliente) ResponderEventoGrupo(_ context.Context, e EntradaResponderEventoGrupo) (RespostaEventoGrupo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return RespostaEventoGrupo{}, err
+	}
+
+	ev, ok := s.eventosGrupo[e.EventoID]
+	if !ok {
+		return RespostaEventoGrupo{}, novoErroAPI(ErrNaoEncontrado, "evento de grupo nao encontrado")
+	}
+	if e.Resposta != RespostaEventoGrupoIndo && e.Resposta != RespostaEventoGrupoNaoIndo && e.Resposta != RespostaEventoGrupoTalvez {
+		return RespostaEventoGrupo{}, novoErroAPI(ErrInvalido, "response invalido")
+	}
+	if e.ConvidadosExtras > 0 {
+		if e.Resposta != RespostaEventoGrupoIndo {
+			return RespostaEventoGrupo{}, novoErroAPI(ErrInvalido, "extra_guest_count so faz sentido quando response e going")
+		}
+		if !ev.PermiteConvidadosExtras {
+			return RespostaEventoGrupo{}, novoErroAPI(ErrInvalido, "evento nao permite convidados extras")
+		}
+	}
+
+	s.seqEvento++
+	return RespostaEventoGrupo{
+		EventoID:   ev.EventoID,
+		MensagemID: fmt.Sprintf("evt-sbx-rsvp-%d", s.seqEvento),
+		Resposta:   e.Resposta,
+	}, nil
 }
 
 func (s *sandboxCliente) CriarGrupo(_ context.Context, e EntradaGrupo) (Grupo, error) {
@@ -383,7 +695,46 @@ func (s *sandboxCliente) CriarGrupo(_ context.Context, e EntradaGrupo) (Grupo, e
 		DonoJID:       "5511999999999@s.whatsapp.net",
 	}
 	s.grupos[jid] = g
+
+	// Assincrono=true espelha o caminho "accepted" que o transporte REST
+	// devolve quando o chamador pede EsperaSincrona.Assincrono (ver
+	// EsperaSincrona em syncz.go): o Dublê não tem provider real nem delay
+	// pra simular, então resolve a operação como "done" na hora, mas a
+	// devolve endereçável via StatusOperacao -- coerente com statusMsg
+	// (mesmo padrão desta task para Enviar/StatusMensagem, task 565).
+	if e.Assincrono {
+		opID := s.registrarOperacaoDoneLocked("create_group", map[string]any{
+			"jid":          g.JID,
+			"subject":      g.Assunto,
+			"participants": g.Participantes,
+		})
+		return Grupo{Status: "accepted", OpID: opID}, nil
+	}
+
 	return *g, nil
+}
+
+// registrarOperacaoDoneLocked cria uma EstadoOperacao já em status "done" e a
+// registra no mapa em memória, devolvendo o opID gerado. Chamador precisa
+// segurar s.mu. Usado pelas operações de grupo que aceitam EsperaSincrona
+// quando o chamador pede o caminho assíncrono (Assincrono=true) -- o Dublê
+// não tem provider real para atrasar, então resolve na hora, mas ainda assim
+// só devolve o resultado via StatusOperacao, igual ao servidor real faria
+// para um provider mais lento.
+func (s *sandboxCliente) registrarOperacaoDoneLocked(operacao string, resultado any) string {
+	s.seqOp++
+	opID := fmt.Sprintf("op-sbx-%d", s.seqOp)
+	resultJSON, _ := json.Marshal(resultado)
+	agora := time.Now().UTC()
+	s.operacoes[opID] = EstadoOperacao{
+		OpID:         opID,
+		Operacao:     operacao,
+		Status:       "done",
+		Result:       resultJSON,
+		CriadaEm:     agora,
+		FinalizadaEm: agora,
+	}
+	return opID
 }
 
 func (s *sandboxCliente) AtualizarNomeGrupo(_ context.Context, e EntradaAtualizarNomeGrupo) (Grupo, error) {
