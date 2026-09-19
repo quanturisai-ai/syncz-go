@@ -53,6 +53,8 @@ const (
 	SyncZap_PairingState_FullMethodName       = "/syncz.v1.SyncZap/PairingState"
 	SyncZap_GetContract_FullMethodName        = "/syncz.v1.SyncZap/GetContract"
 	SyncZap_GrantConsent_FullMethodName       = "/syncz.v1.SyncZap/GrantConsent"
+	SyncZap_RequestConsent_FullMethodName     = "/syncz.v1.SyncZap/RequestConsent"
+	SyncZap_UnpairInstance_FullMethodName     = "/syncz.v1.SyncZap/UnpairInstance"
 	SyncZap_GetUsage_FullMethodName           = "/syncz.v1.SyncZap/GetUsage"
 )
 
@@ -114,6 +116,12 @@ type SyncZapClient interface {
 	PairingState(ctx context.Context, in *PairingStateRequest, opts ...grpc.CallOption) (*PairingStateInfo, error)
 	GetContract(ctx context.Context, in *GetContractRequest, opts ...grpc.CallOption) (*ContractInfo, error)
 	GrantConsent(ctx context.Context, in *GrantConsentRequest, opts ...grpc.CallOption) (*GrantConsentResponse, error)
+	// RequestConsent (task 588, CA-15) pede autorizacao do titular por DM pelo
+	// numero pareado -- equivalente gRPC de POST .../consent/request (task 587).
+	RequestConsent(ctx context.Context, in *RequestConsentRequest, opts ...grpc.CallOption) (*RequestConsentResponse, error)
+	// UnpairInstance (task 588, CA-15) desfaz o pareamento sem apagar a
+	// instancia -- equivalente gRPC de POST .../unpair (task 593).
+	UnpairInstance(ctx context.Context, in *UnpairInstanceRequest, opts ...grpc.CallOption) (*Instance, error)
 	GetUsage(ctx context.Context, in *GetUsageRequest, opts ...grpc.CallOption) (*GetUsageResponse, error)
 }
 
@@ -489,6 +497,26 @@ func (c *syncZapClient) GrantConsent(ctx context.Context, in *GrantConsentReques
 	return out, nil
 }
 
+func (c *syncZapClient) RequestConsent(ctx context.Context, in *RequestConsentRequest, opts ...grpc.CallOption) (*RequestConsentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestConsentResponse)
+	err := c.cc.Invoke(ctx, SyncZap_RequestConsent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *syncZapClient) UnpairInstance(ctx context.Context, in *UnpairInstanceRequest, opts ...grpc.CallOption) (*Instance, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Instance)
+	err := c.cc.Invoke(ctx, SyncZap_UnpairInstance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *syncZapClient) GetUsage(ctx context.Context, in *GetUsageRequest, opts ...grpc.CallOption) (*GetUsageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUsageResponse)
@@ -557,6 +585,12 @@ type SyncZapServer interface {
 	PairingState(context.Context, *PairingStateRequest) (*PairingStateInfo, error)
 	GetContract(context.Context, *GetContractRequest) (*ContractInfo, error)
 	GrantConsent(context.Context, *GrantConsentRequest) (*GrantConsentResponse, error)
+	// RequestConsent (task 588, CA-15) pede autorizacao do titular por DM pelo
+	// numero pareado -- equivalente gRPC de POST .../consent/request (task 587).
+	RequestConsent(context.Context, *RequestConsentRequest) (*RequestConsentResponse, error)
+	// UnpairInstance (task 588, CA-15) desfaz o pareamento sem apagar a
+	// instancia -- equivalente gRPC de POST .../unpair (task 593).
+	UnpairInstance(context.Context, *UnpairInstanceRequest) (*Instance, error)
 	GetUsage(context.Context, *GetUsageRequest) (*GetUsageResponse, error)
 	mustEmbedUnimplementedSyncZapServer()
 }
@@ -669,6 +703,12 @@ func (UnimplementedSyncZapServer) GetContract(context.Context, *GetContractReque
 }
 func (UnimplementedSyncZapServer) GrantConsent(context.Context, *GrantConsentRequest) (*GrantConsentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GrantConsent not implemented")
+}
+func (UnimplementedSyncZapServer) RequestConsent(context.Context, *RequestConsentRequest) (*RequestConsentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestConsent not implemented")
+}
+func (UnimplementedSyncZapServer) UnpairInstance(context.Context, *UnpairInstanceRequest) (*Instance, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnpairInstance not implemented")
 }
 func (UnimplementedSyncZapServer) GetUsage(context.Context, *GetUsageRequest) (*GetUsageResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUsage not implemented")
@@ -1270,6 +1310,42 @@ func _SyncZap_GrantConsent_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SyncZap_RequestConsent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestConsentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SyncZapServer).RequestConsent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SyncZap_RequestConsent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SyncZapServer).RequestConsent(ctx, req.(*RequestConsentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SyncZap_UnpairInstance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnpairInstanceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SyncZapServer).UnpairInstance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SyncZap_UnpairInstance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SyncZapServer).UnpairInstance(ctx, req.(*UnpairInstanceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SyncZap_GetUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetUsageRequest)
 	if err := dec(in); err != nil {
@@ -1414,6 +1490,14 @@ var SyncZap_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GrantConsent",
 			Handler:    _SyncZap_GrantConsent_Handler,
+		},
+		{
+			MethodName: "RequestConsent",
+			Handler:    _SyncZap_RequestConsent_Handler,
+		},
+		{
+			MethodName: "UnpairInstance",
+			Handler:    _SyncZap_UnpairInstance_Handler,
 		},
 		{
 			MethodName: "GetUsage",

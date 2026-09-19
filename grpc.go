@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	synczv1 "github.com/quanturisai-ai/syncz-go/synczv1"
 )
@@ -199,6 +200,44 @@ func (c *clienteGRPC) RevogarInstancia(ctx context.Context, id string) (Instanci
 	return instanciaDoProto(resp), nil
 }
 
+// Desparear (task 589, CA-16/CA-20) desfaz o pareamento sem apagar a instancia.
+func (c *clienteGRPC) Desparear(ctx context.Context, instanciaID string) (Instancia, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	resp, err := c.cli.UnpairInstance(ctx, &synczv1.UnpairInstanceRequest{Id: instanciaID})
+	if err != nil {
+		return Instancia{}, mapearErroGRPC(err)
+	}
+	return instanciaDoProto(resp), nil
+}
+
+// SolicitarConsentimento (task 589, CA-16/CA-13) pede ao titular, por DM
+// pelo numero pareado, que autorize a instancia.
+func (c *clienteGRPC) SolicitarConsentimento(ctx context.Context, e EntradaSolicitarConsentimento) (PedidoConsentimento, error) {
+	ctx, cancel := c.comPrazo(ctx)
+	defer cancel()
+
+	resp, err := c.cli.RequestConsent(ctx, &synczv1.RequestConsentRequest{
+		InstanceId: e.InstanciaID,
+		Via:        e.Via,
+		To:         e.Para,
+		Text:       e.Texto,
+	})
+	if err != nil {
+		return PedidoConsentimento{}, mapearErroGRPC(err)
+	}
+	var exp time.Time
+	if resp.GetExpiresAt() != nil {
+		exp = resp.GetExpiresAt().AsTime()
+	}
+	return PedidoConsentimento{
+		RequestID: resp.GetRequestId(),
+		ExpiraEm:  exp,
+		Link:      resp.GetLink(),
+	}, nil
+}
+
 func (c *clienteGRPC) NovoLinkWizard(ctx context.Context, instanciaID string) (LinkWizard, error) {
 	ctx, cancel := c.comPrazo(ctx)
 	defer cancel()
@@ -279,12 +318,21 @@ func (c *clienteGRPC) RegistrarAceite(ctx context.Context, e EntradaAceite) erro
 	ctx, cancel := c.comPrazo(ctx)
 	defer cancel()
 
-	_, err := c.cli.GrantConsent(ctx, &synczv1.GrantConsentRequest{
+	req := &synczv1.GrantConsentRequest{
 		InstanceId: e.InstanciaID,
 		Scopes:     e.EscoposOpcionais,
 		UserIp:     e.IPTitular,
 		UserAgent:  e.UserAgentTitular,
-	})
+	}
+	if len(e.Evidencia) > 0 {
+		ev, err := structpb.NewStruct(e.Evidencia)
+		if err != nil {
+			return novoErroAPI(ErrInvalido, fmt.Sprintf("evidencia invalida: %v", err))
+		}
+		req.Evidence = ev
+	}
+
+	_, err := c.cli.GrantConsent(ctx, req)
 	return mapearErroGRPC(err)
 }
 
@@ -960,15 +1008,50 @@ func instanciaDoProto(p *synczv1.Instance) Instancia {
 	if p.GetUpdatedAt() != nil {
 		updated = p.GetUpdatedAt().AsTime()
 	}
-	return Instancia{
-		ID:           p.GetId(),
-		TenantID:     p.GetTenantId(),
-		Nome:         p.GetName(),
-		Telefone:     p.GetPhone(),
-		Status:       p.GetStatus(),
-		CriadaEm:     created,
-		AtualizadaEm: updated,
+	var pareadoEm *time.Time
+	if p.GetPairedAt() != nil {
+		t := p.GetPairedAt().AsTime()
+		pareadoEm = &t
 	}
+	return Instancia{
+		ID:            p.GetId(),
+		TenantID:      p.GetTenantId(),
+		Nome:          p.GetName(),
+		Telefone:      p.GetPhone(),
+		Status:        p.GetStatus(),
+		PareadoEm:     pareadoEm,
+		Consentimento: consentimentoDoProto(p.GetConsent()),
+		CriadaEm:      created,
+		AtualizadaEm:  updated,
+	}
+}
+
+// consentimentoDoProto (task 589, CA-16) traduz o bloco Consent do proto
+// (task 583, CA-08) para ConsentimentoInfo.
+func consentimentoDoProto(c *synczv1.Consent) ConsentimentoInfo {
+	if c == nil {
+		return ConsentimentoInfo{}
+	}
+	info := ConsentimentoInfo{
+		Status:         c.GetStatus(),
+		Origem:         c.GetOrigin(),
+		ConcedidoPor:   c.GetGrantedBy(),
+		VersaoContrato: int(c.GetContractVersion()),
+		Escopos:        c.GetScopes(),
+	}
+	if c.GetRequestedAt() != nil {
+		t := c.GetRequestedAt().AsTime()
+		info.SolicitadoEm = &t
+	}
+	if c.GetGrantedAt() != nil {
+		t := c.GetGrantedAt().AsTime()
+		info.ConcedidoEm = &t
+	}
+	if c.GetRevokedAt() != nil {
+		t := c.GetRevokedAt().AsTime()
+		info.RevogadoEm = &t
+	}
+	return info
 }
 
 // suppress unused import warning

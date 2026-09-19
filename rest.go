@@ -170,6 +170,73 @@ func parseUnixSeconds(sec int64) time.Time {
 	return time.Unix(sec, 0).UTC()
 }
 
+// instanciaRespDTO e' o formato de instancia devolvido por
+// CriarInstancia/ObterInstancia/ListarInstancias/RevogarInstancia/Desparear --
+// um unico shape para as 5 respostas (internal/transport/rest/dto.go,
+// instanceResp), decodificado por instanciaDoResp (task 589, CA-16 --
+// unifica os 4 blocos antes duplicados).
+type instanciaRespDTO struct {
+	ID        string         `json:"id"`
+	TenantID  string         `json:"tenant_id"`
+	Name      string         `json:"name"`
+	Phone     string         `json:"phone"`
+	Status    string         `json:"status"`
+	PairedAt  string         `json:"paired_at,omitempty"`
+	Consent   consentRespDTO `json:"consent"`
+	CreatedAt string         `json:"created_at"`
+	UpdatedAt string         `json:"updated_at"`
+}
+
+// consentRespDTO espelha internal/transport/rest/dto_consent.go (consentDTO).
+type consentRespDTO struct {
+	Status          string   `json:"status"`
+	Origin          string   `json:"origin,omitempty"`
+	GrantedBy       string   `json:"granted_by,omitempty"`
+	RequestedAt     string   `json:"requested_at,omitempty"`
+	GrantedAt       string   `json:"granted_at,omitempty"`
+	RevokedAt       string   `json:"revoked_at,omitempty"`
+	ContractVersion int      `json:"contract_version,omitempty"`
+	Scopes          []string `json:"scopes,omitempty"`
+}
+
+func instanciaDoResp(res instanciaRespDTO) Instancia {
+	var pareadoEm *time.Time
+	if res.PairedAt != "" {
+		t := parseTimestamp(res.PairedAt)
+		pareadoEm = &t
+	}
+	info := ConsentimentoInfo{
+		Status:         res.Consent.Status,
+		Origem:         res.Consent.Origin,
+		ConcedidoPor:   res.Consent.GrantedBy,
+		VersaoContrato: res.Consent.ContractVersion,
+		Escopos:        res.Consent.Scopes,
+	}
+	if res.Consent.RequestedAt != "" {
+		t := parseTimestamp(res.Consent.RequestedAt)
+		info.SolicitadoEm = &t
+	}
+	if res.Consent.GrantedAt != "" {
+		t := parseTimestamp(res.Consent.GrantedAt)
+		info.ConcedidoEm = &t
+	}
+	if res.Consent.RevokedAt != "" {
+		t := parseTimestamp(res.Consent.RevokedAt)
+		info.RevogadoEm = &t
+	}
+	return Instancia{
+		ID:            res.ID,
+		TenantID:      res.TenantID,
+		Nome:          res.Name,
+		Telefone:      res.Phone,
+		Status:        res.Status,
+		PareadoEm:     pareadoEm,
+		Consentimento: info,
+		CriadaEm:      parseTimestamp(res.CreatedAt),
+		AtualizadaEm:  parseTimestamp(res.UpdatedAt),
+	}
+}
+
 func (c *clienteREST) CriarInstancia(ctx context.Context, e EntradaCriarInstancia) (Instancia, error) {
 	corpo := map[string]string{
 		"name": e.Nome,
@@ -183,28 +250,11 @@ func (c *clienteREST) CriarInstancia(ctx context.Context, e EntradaCriarInstanci
 		return Instancia{}, err
 	}
 
-	var res struct {
-		ID        string `json:"id"`
-		TenantID  string `json:"tenant_id"`
-		Name      string `json:"name"`
-		Phone     string `json:"phone"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-	}
+	var res instanciaRespDTO
 	if err := json.Unmarshal(respBytes, &res); err != nil {
 		return Instancia{}, fmt.Errorf("syncz: desserializar instancia: %w", err)
 	}
-
-	return Instancia{
-		ID:           res.ID,
-		TenantID:     res.TenantID,
-		Nome:         res.Name,
-		Telefone:     res.Phone,
-		Status:       res.Status,
-		CriadaEm:     parseTimestamp(res.CreatedAt),
-		AtualizadaEm: parseTimestamp(res.UpdatedAt),
-	}, nil
+	return instanciaDoResp(res), nil
 }
 
 func (c *clienteREST) ObterInstancia(ctx context.Context, id string) (Instancia, error) {
@@ -213,28 +263,11 @@ func (c *clienteREST) ObterInstancia(ctx context.Context, id string) (Instancia,
 		return Instancia{}, err
 	}
 
-	var res struct {
-		ID        string `json:"id"`
-		TenantID  string `json:"tenant_id"`
-		Name      string `json:"name"`
-		Phone     string `json:"phone"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-	}
+	var res instanciaRespDTO
 	if err := json.Unmarshal(respBytes, &res); err != nil {
 		return Instancia{}, fmt.Errorf("syncz: desserializar instancia: %w", err)
 	}
-
-	return Instancia{
-		ID:           res.ID,
-		TenantID:     res.TenantID,
-		Nome:         res.Name,
-		Telefone:     res.Phone,
-		Status:       res.Status,
-		CriadaEm:     parseTimestamp(res.CreatedAt),
-		AtualizadaEm: parseTimestamp(res.UpdatedAt),
-	}, nil
+	return instanciaDoResp(res), nil
 }
 
 func (c *clienteREST) ListarInstancias(ctx context.Context, e EntradaListarInstancias) (ListaInstancias, error) {
@@ -245,16 +278,8 @@ func (c *clienteREST) ListarInstancias(ctx context.Context, e EntradaListarInsta
 	}
 
 	var res struct {
-		Instances []struct {
-			ID        string `json:"id"`
-			TenantID  string `json:"tenant_id"`
-			Name      string `json:"name"`
-			Phone     string `json:"phone"`
-			Status    string `json:"status"`
-			CreatedAt string `json:"created_at"`
-			UpdatedAt string `json:"updated_at"`
-		} `json:"instances"`
-		Total int32 `json:"total"`
+		Instances []instanciaRespDTO `json:"instances"`
+		Total     int32              `json:"total"`
 	}
 	if err := json.Unmarshal(respBytes, &res); err != nil {
 		return ListaInstancias{}, fmt.Errorf("syncz: desserializar lista de instancias: %w", err)
@@ -262,15 +287,7 @@ func (c *clienteREST) ListarInstancias(ctx context.Context, e EntradaListarInsta
 
 	lista := make([]Instancia, len(res.Instances))
 	for i, item := range res.Instances {
-		lista[i] = Instancia{
-			ID:           item.ID,
-			TenantID:     item.TenantID,
-			Nome:         item.Name,
-			Telefone:     item.Phone,
-			Status:       item.Status,
-			CriadaEm:     parseTimestamp(item.CreatedAt),
-			AtualizadaEm: parseTimestamp(item.UpdatedAt),
-		}
+		lista[i] = instanciaDoResp(item)
 	}
 
 	return ListaInstancias{
@@ -285,28 +302,25 @@ func (c *clienteREST) RevogarInstancia(ctx context.Context, id string) (Instanci
 		return Instancia{}, err
 	}
 
-	var res struct {
-		ID        string `json:"id"`
-		TenantID  string `json:"tenant_id"`
-		Name      string `json:"name"`
-		Phone     string `json:"phone"`
-		Status    string `json:"status"`
-		CreatedAt string `json:"created_at"`
-		UpdatedAt string `json:"updated_at"`
-	}
+	var res instanciaRespDTO
 	if err := json.Unmarshal(respBytes, &res); err != nil {
 		return Instancia{}, fmt.Errorf("syncz: desserializar instancia revogada: %w", err)
 	}
+	return instanciaDoResp(res), nil
+}
 
-	return Instancia{
-		ID:           res.ID,
-		TenantID:     res.TenantID,
-		Nome:         res.Name,
-		Telefone:     res.Phone,
-		Status:       res.Status,
-		CriadaEm:     parseTimestamp(res.CreatedAt),
-		AtualizadaEm: parseTimestamp(res.UpdatedAt),
-	}, nil
+// Desparear (task 589, CA-16/CA-20) desfaz o pareamento sem apagar a instancia.
+func (c *clienteREST) Desparear(ctx context.Context, instanciaID string) (Instancia, error) {
+	_, respBytes, err := c.requisicao(ctx, http.MethodPost, "/api/v1/instances/"+url.PathEscape(instanciaID)+"/unpair", nil, "")
+	if err != nil {
+		return Instancia{}, err
+	}
+
+	var res instanciaRespDTO
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return Instancia{}, fmt.Errorf("syncz: desserializar instancia desparada: %w", err)
+	}
+	return instanciaDoResp(res), nil
 }
 
 // AtualizarEstadoDesejado consulta/atualiza via PATCH .../instances/{id} --
@@ -720,8 +734,78 @@ func (c *clienteREST) RegistrarAceite(ctx context.Context, e EntradaAceite) erro
 		"user_ip":    e.IPTitular,
 		"user_agent": e.UserAgentTitular,
 	}
+	if len(e.Evidencia) > 0 {
+		corpo["evidence"] = e.Evidencia
+	}
 	_, _, err := c.requisicao(ctx, http.MethodPost, "/api/v1/instances/"+url.PathEscape(e.InstanciaID)+"/consent", corpo, "")
 	return err
+}
+
+// SolicitarConsentimento (task 589, CA-16/CA-13) pede ao titular, por DM
+// pelo numero pareado, que autorize a instancia.
+func (c *clienteREST) SolicitarConsentimento(ctx context.Context, e EntradaSolicitarConsentimento) (PedidoConsentimento, error) {
+	corpo := map[string]any{
+		"via": e.Via,
+	}
+	if e.Para != "" {
+		corpo["to"] = e.Para
+	}
+	if e.Texto != "" {
+		corpo["text"] = e.Texto
+	}
+
+	_, respBytes, err := c.requisicao(ctx, http.MethodPost, "/api/v1/instances/"+url.PathEscape(e.InstanciaID)+"/consent/request", corpo, "")
+	if err != nil {
+		return PedidoConsentimento{}, err
+	}
+
+	var res struct {
+		RequestID string `json:"request_id"`
+		ExpiresAt string `json:"expires_at"`
+		Link      string `json:"link"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return PedidoConsentimento{}, fmt.Errorf("syncz: desserializar pedido de consentimento: %w", err)
+	}
+	return PedidoConsentimento{
+		RequestID: res.RequestID,
+		ExpiraEm:  parseTimestamp(res.ExpiresAt),
+		Link:      res.Link,
+	}, nil
+}
+
+// ObterContratoTenant (task 589, CA-16) le GET /api/v1/contract -- so' o
+// transporte REST implementa (ClienteContratoTenant; descoberta de contrato
+// e' HTTP-only, T-22).
+func (c *clienteREST) ObterContratoTenant(ctx context.Context) (ContratoTenant, error) {
+	_, respBytes, err := c.requisicao(ctx, http.MethodGet, "/api/v1/contract", nil, "")
+	if err != nil {
+		return ContratoTenant{}, err
+	}
+
+	var res struct {
+		APIVersion        string   `json:"api_version"`
+		ContractHash      string   `json:"contract_hash"`
+		ContractVersion   string   `json:"contract_version"`
+		SupportedVersions []string `json:"supported_versions"`
+		PreConsent        struct {
+			Send    bool `json:"send"`
+			Receive bool `json:"receive"`
+		} `json:"pre_consent"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return ContratoTenant{}, fmt.Errorf("syncz: desserializar contrato do tenant: %w", err)
+	}
+	return ContratoTenant{
+		VersaoAPI:         res.APIVersion,
+		HashContrato:      res.ContractHash,
+		VersaoContrato:    res.ContractVersion,
+		VersoesSuportadas: res.SupportedVersions,
+		PreConsentimento: PreConsentimentoInfo{
+			Enviar:  res.PreConsent.Send,
+			Receber: res.PreConsent.Receive,
+		},
+	}, nil
 }
 
 func (c *clienteREST) Enviar(ctx context.Context, e EntradaEnvio) (Recibo, error) {

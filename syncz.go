@@ -27,8 +27,31 @@ type Instancia struct {
 	Telefone       string
 	Status         string
 	EstadoDesejado string
-	CriadaEm       time.Time
-	AtualizadaEm   time.Time
+	// PareadoEm (task 589, CA-16) e' quando a instancia entrou em `paired`
+	// nesta janela de pareamento -- nil antes do primeiro pareamento ou apos
+	// Desparear. So' vem preenchido por ObterInstancia/ListarInstancias (mesma
+	// convencao de decodificacao parcial do resto do SDK).
+	PareadoEm *time.Time
+	// Consentimento (task 589, CA-16) e' o consentimento vigente da instancia
+	// -- so' vem preenchido por ObterInstancia/ListarInstancias.
+	Consentimento ConsentimentoInfo
+	CriadaEm      time.Time
+	AtualizadaEm  time.Time
+}
+
+// ConsentimentoInfo e' o bloco `consent` da instancia (task 589, CA-16):
+// status="none" quando a instancia nunca teve contrato; "requested" quando ha'
+// um pedido pendente (SolicitarConsentimento); "granted"/"revoked" apos o
+// aceite/revogacao.
+type ConsentimentoInfo struct {
+	Status         string
+	Origem         string
+	ConcedidoPor   string
+	SolicitadoEm   *time.Time
+	ConcedidoEm    *time.Time
+	RevogadoEm     *time.Time
+	VersaoContrato int
+	Escopos        []string
 }
 
 // Valores válidos do parâmetro estado de AtualizarEstadoDesejado -- espelham
@@ -118,6 +141,26 @@ type EntradaAceite struct {
 	EscoposOpcionais []string
 	IPTitular        string
 	UserAgentTitular string
+	// Evidencia (task 589, CA-16) e' a prova livre que so' o caminho tenant
+	// aceita -- objeto JSON <= 4KiB (o servidor recusa acima disso ou se nao
+	// for objeto). nil/vazio e' valido (nenhuma evidencia extra).
+	Evidencia map[string]any
+}
+
+// EntradaSolicitarConsentimento (task 589, CA-16) pede ao titular, por DM,
+// que autorize a instancia.
+type EntradaSolicitarConsentimento struct {
+	InstanciaID string
+	Via         string // so' "whatsapp" hoje
+	Para        string // "self" (default, vazio equivale) | "<phone>"
+	Texto       string // opcional -- default em pt-BR se vazio
+}
+
+// PedidoConsentimento e' devolvido por SolicitarConsentimento (task 589, CA-16).
+type PedidoConsentimento struct {
+	RequestID string
+	ExpiraEm  time.Time
+	Link      string
 }
 
 // EntradaEnvio parâmetros para envio de mensagem de texto.
@@ -536,15 +579,25 @@ type Uso struct {
 // cru (json.RawMessage) porque o formato depende de Tipo
 // (message.received, instance.connected, ...), o mesmo motivo de
 // EstadoOperacao.Result vir cru.
+// As tags json (task 589, CA-16) espelham internal/core.Event -- mesmo
+// envelope no outbox, no stream SSE/gRPC (campo a campo) e no corpo do
+// webhook, o que e' o que permite DecodificarEvento fazer um json.Unmarshal
+// direto sem tradutor.
 type Evento struct {
-	ID          string
-	Tipo        string
-	InstanciaID string
-	ChatJID     string
-	Seq         int64
-	OcorridoEm  time.Time
-	Payload     json.RawMessage
-	TraceID     string
+	ID          string          `json:"id"`
+	Tipo        string          `json:"type"`
+	InstanciaID string          `json:"instance_id"`
+	ChatJID     string          `json:"chat_jid"`
+	Seq         int64           `json:"seq"`
+	OcorridoEm  time.Time       `json:"occurred_at"`
+	Payload     json.RawMessage `json:"payload"`
+	TraceID     string          `json:"trace_id"`
+	// PayloadTipado (task 589, CA-16) e' preenchido por DecodificarEvento
+	// quando Tipo e' um dos reconhecidos (ver constantes Tipo* em
+	// eventos_tipados.go) -- nil para tipos nao mapeados, sem quebrar quem so'
+	// le Payload manualmente. Sem tag json: nunca veio do fio, so' e'
+	// produzido localmente.
+	PayloadTipado any `json:"-"`
 }
 
 // EventoStream é um item do stream de AcompanharEventos. Err vem preenchido
@@ -609,6 +662,39 @@ type ClientePareamentoStream interface {
 	AcompanharPareamento(ctx context.Context, instanciaID string) (<-chan EventoPareamento, error)
 }
 
+// ContratoTenant descreve o contrato da API como um todo (GET
+// /api/v1/contract, D-4.4) -- diferente de ContratoInfo, que e' o termo de
+// consentimento por instancia. PreConsentimento e' o achado da task 589,
+// CA-16: o valor efetivo de pre-consentimento do tenant autenticado.
+type ContratoTenant struct {
+	VersaoAPI         string
+	HashContrato      string
+	VersaoContrato    string
+	VersoesSuportadas []string
+	PreConsentimento  PreConsentimentoInfo
+}
+
+// PreConsentimentoInfo e' ContratoTenant.PreConsentimento (task 589, CA-16).
+type PreConsentimentoInfo struct {
+	Enviar  bool
+	Receber bool
+}
+
+// ClienteContratoTenant e' implementado pelos transportes de Cliente que
+// suportam ObterContratoTenant -- mesmo criterio de ClienteEventosStream:
+// hoje so' o transporte REST serve GET /api/v1/contract (descoberta de
+// contrato e' HTTP-only por decisao de arquitetura -- T-22 -- o cliente gRPC
+// ja conhece o hash embutido em tempo de compilacao via synczv1). Descubra o
+// suporte por assercao de tipo:
+//
+//	if ct, ok := cli.(syncz.ClienteContratoTenant); ok {
+//	    contrato, err := ct.ObterContratoTenant(ctx)
+//	    ...
+//	}
+type ClienteContratoTenant interface {
+	ObterContratoTenant(ctx context.Context) (ContratoTenant, error)
+}
+
 // Cliente contrato unificado de comunicação com o gateway sync-zap.
 // Implementado pelos transportes gRPC, REST e pelo Dublê Sandbox.
 type Cliente interface {
@@ -618,10 +704,16 @@ type Cliente interface {
 	RevogarInstancia(ctx context.Context, id string) (Instancia, error)
 	AtualizarEstadoDesejado(ctx context.Context, instanciaID, estado string) (Instancia, error)
 	NovoLinkWizard(ctx context.Context, instanciaID string) (LinkWizard, error)
+	// Desparear (task 589, CA-16/CA-20) desfaz o pareamento sem apagar a
+	// instancia -- o aparelho some de "Aparelhos conectados" no celular.
+	Desparear(ctx context.Context, instanciaID string) (Instancia, error)
 
 	EstadoPareamento(ctx context.Context, instanciaID string) (Pareamento, error)
 	Contrato(ctx context.Context, instanciaID string) (ContratoInfo, error)
 	RegistrarAceite(ctx context.Context, e EntradaAceite) error
+	// SolicitarConsentimento (task 589, CA-16/CA-13) pede ao titular, por DM
+	// pelo numero pareado, que autorize a instancia.
+	SolicitarConsentimento(ctx context.Context, e EntradaSolicitarConsentimento) (PedidoConsentimento, error)
 
 	Enviar(ctx context.Context, e EntradaEnvio) (Recibo, error)
 	EnviarMidia(ctx context.Context, e EntradaEnvioMidia) (Recibo, error)

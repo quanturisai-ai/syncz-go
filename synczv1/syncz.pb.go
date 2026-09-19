@@ -9,6 +9,7 @@ package synczv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -1097,14 +1098,19 @@ func (x *ListInstancesResponse) GetTotal() int32 {
 }
 
 type Instance struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	TenantId      string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Phone         string                 `protobuf:"bytes,4,opt,name=phone,proto3" json:"phone,omitempty"`
-	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Id        string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	TenantId  string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	Name      string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Phone     string                 `protobuf:"bytes,4,opt,name=phone,proto3" json:"phone,omitempty"`
+	Status    string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// paired_at e' quando a instancia entrou em `paired` nesta janela de
+	// pareamento -- ausente antes do primeiro pareamento ou apos unpair
+	// (task 593). Distinto de last_connected_at (task 583, CA-08).
+	PairedAt      *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=paired_at,json=pairedAt,proto3" json:"paired_at,omitempty"`
+	Consent       *Consent               `protobuf:"bytes,9,opt,name=consent,proto3" json:"consent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1188,6 +1194,124 @@ func (x *Instance) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Instance) GetPairedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PairedAt
+	}
+	return nil
+}
+
+func (x *Instance) GetConsent() *Consent {
+	if x != nil {
+		return x.Consent
+	}
+	return nil
+}
+
+// Consent e' o consentimento vigente da instancia (task 583, CA-08): o
+// contrato mais recente, ativo ou revogado. status="none" quando a instancia
+// nunca teve contrato; "requested" fica reservado para quando existir o
+// pedido pendente (task 587, T-D1, ainda nao emitido).
+type Consent struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Status          string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"` // none | requested | granted | revoked
+	Origin          string                 `protobuf:"bytes,2,opt,name=origin,proto3" json:"origin,omitempty"` // gateway_web | gateway_whatsapp | tenant
+	GrantedBy       string                 `protobuf:"bytes,3,opt,name=granted_by,json=grantedBy,proto3" json:"granted_by,omitempty"`
+	RequestedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=requested_at,json=requestedAt,proto3" json:"requested_at,omitempty"`
+	GrantedAt       *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=granted_at,json=grantedAt,proto3" json:"granted_at,omitempty"`
+	RevokedAt       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=revoked_at,json=revokedAt,proto3" json:"revoked_at,omitempty"`
+	ContractVersion int32                  `protobuf:"varint,7,opt,name=contract_version,json=contractVersion,proto3" json:"contract_version,omitempty"`
+	Scopes          []string               `protobuf:"bytes,8,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Consent) Reset() {
+	*x = Consent{}
+	mi := &file_syncz_v1_syncz_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Consent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Consent) ProtoMessage() {}
+
+func (x *Consent) ProtoReflect() protoreflect.Message {
+	mi := &file_syncz_v1_syncz_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Consent.ProtoReflect.Descriptor instead.
+func (*Consent) Descriptor() ([]byte, []int) {
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *Consent) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *Consent) GetOrigin() string {
+	if x != nil {
+		return x.Origin
+	}
+	return ""
+}
+
+func (x *Consent) GetGrantedBy() string {
+	if x != nil {
+		return x.GrantedBy
+	}
+	return ""
+}
+
+func (x *Consent) GetRequestedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RequestedAt
+	}
+	return nil
+}
+
+func (x *Consent) GetGrantedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.GrantedAt
+	}
+	return nil
+}
+
+func (x *Consent) GetRevokedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RevokedAt
+	}
+	return nil
+}
+
+func (x *Consent) GetContractVersion() int32 {
+	if x != nil {
+		return x.ContractVersion
+	}
+	return 0
+}
+
+func (x *Consent) GetScopes() []string {
+	if x != nil {
+		return x.Scopes
+	}
+	return nil
+}
+
 type NewWizardLinkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	InstanceId    string                 `protobuf:"bytes,1,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
@@ -1197,7 +1321,7 @@ type NewWizardLinkRequest struct {
 
 func (x *NewWizardLinkRequest) Reset() {
 	*x = NewWizardLinkRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[17]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1209,7 +1333,7 @@ func (x *NewWizardLinkRequest) String() string {
 func (*NewWizardLinkRequest) ProtoMessage() {}
 
 func (x *NewWizardLinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[17]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1222,7 +1346,7 @@ func (x *NewWizardLinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NewWizardLinkRequest.ProtoReflect.Descriptor instead.
 func (*NewWizardLinkRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{17}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NewWizardLinkRequest) GetInstanceId() string {
@@ -1244,7 +1368,7 @@ type WizardLink struct {
 
 func (x *WizardLink) Reset() {
 	*x = WizardLink{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[18]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1256,7 +1380,7 @@ func (x *WizardLink) String() string {
 func (*WizardLink) ProtoMessage() {}
 
 func (x *WizardLink) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[18]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1269,7 +1393,7 @@ func (x *WizardLink) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WizardLink.ProtoReflect.Descriptor instead.
 func (*WizardLink) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{18}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *WizardLink) GetInstanceId() string {
@@ -1309,7 +1433,7 @@ type RevokeInstanceRequest struct {
 
 func (x *RevokeInstanceRequest) Reset() {
 	*x = RevokeInstanceRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[19]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1321,7 +1445,7 @@ func (x *RevokeInstanceRequest) String() string {
 func (*RevokeInstanceRequest) ProtoMessage() {}
 
 func (x *RevokeInstanceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[19]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1334,7 +1458,7 @@ func (x *RevokeInstanceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeInstanceRequest.ProtoReflect.Descriptor instead.
 func (*RevokeInstanceRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{19}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RevokeInstanceRequest) GetId() string {
@@ -1353,7 +1477,7 @@ type GetPolicyRequest struct {
 
 func (x *GetPolicyRequest) Reset() {
 	*x = GetPolicyRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[20]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1365,7 +1489,7 @@ func (x *GetPolicyRequest) String() string {
 func (*GetPolicyRequest) ProtoMessage() {}
 
 func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[20]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1378,7 +1502,7 @@ func (x *GetPolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyRequest.ProtoReflect.Descriptor instead.
 func (*GetPolicyRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{20}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetPolicyRequest) GetInstanceId() string {
@@ -1398,7 +1522,7 @@ type UpdatePolicyRequest struct {
 
 func (x *UpdatePolicyRequest) Reset() {
 	*x = UpdatePolicyRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[21]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1534,7 @@ func (x *UpdatePolicyRequest) String() string {
 func (*UpdatePolicyRequest) ProtoMessage() {}
 
 func (x *UpdatePolicyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[21]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +1547,7 @@ func (x *UpdatePolicyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdatePolicyRequest.ProtoReflect.Descriptor instead.
 func (*UpdatePolicyRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{21}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UpdatePolicyRequest) GetInstanceId() string {
@@ -1450,7 +1574,7 @@ type Policy struct {
 
 func (x *Policy) Reset() {
 	*x = Policy{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[22]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1462,7 +1586,7 @@ func (x *Policy) String() string {
 func (*Policy) ProtoMessage() {}
 
 func (x *Policy) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[22]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1475,7 +1599,7 @@ func (x *Policy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Policy.ProtoReflect.Descriptor instead.
 func (*Policy) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{22}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Policy) GetInstanceId() string {
@@ -1514,7 +1638,7 @@ type CreateGroupRequest struct {
 
 func (x *CreateGroupRequest) Reset() {
 	*x = CreateGroupRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[23]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1526,7 +1650,7 @@ func (x *CreateGroupRequest) String() string {
 func (*CreateGroupRequest) ProtoMessage() {}
 
 func (x *CreateGroupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[23]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1539,7 +1663,7 @@ func (x *CreateGroupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateGroupRequest.ProtoReflect.Descriptor instead.
 func (*CreateGroupRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{23}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CreateGroupRequest) GetInstanceId() string {
@@ -1590,7 +1714,7 @@ type UpdateGroupNameRequest struct {
 
 func (x *UpdateGroupNameRequest) Reset() {
 	*x = UpdateGroupNameRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[24]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1602,7 +1726,7 @@ func (x *UpdateGroupNameRequest) String() string {
 func (*UpdateGroupNameRequest) ProtoMessage() {}
 
 func (x *UpdateGroupNameRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[24]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1615,7 +1739,7 @@ func (x *UpdateGroupNameRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateGroupNameRequest.ProtoReflect.Descriptor instead.
 func (*UpdateGroupNameRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{24}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *UpdateGroupNameRequest) GetInstanceId() string {
@@ -1666,7 +1790,7 @@ type GroupPhotoChunk struct {
 
 func (x *GroupPhotoChunk) Reset() {
 	*x = GroupPhotoChunk{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[25]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1678,7 +1802,7 @@ func (x *GroupPhotoChunk) String() string {
 func (*GroupPhotoChunk) ProtoMessage() {}
 
 func (x *GroupPhotoChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[25]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1691,7 +1815,7 @@ func (x *GroupPhotoChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GroupPhotoChunk.ProtoReflect.Descriptor instead.
 func (*GroupPhotoChunk) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{25}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GroupPhotoChunk) GetData() isGroupPhotoChunk_Data {
@@ -1748,7 +1872,7 @@ type GroupPhotoMetadata struct {
 
 func (x *GroupPhotoMetadata) Reset() {
 	*x = GroupPhotoMetadata{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[26]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1760,7 +1884,7 @@ func (x *GroupPhotoMetadata) String() string {
 func (*GroupPhotoMetadata) ProtoMessage() {}
 
 func (x *GroupPhotoMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[26]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1773,7 +1897,7 @@ func (x *GroupPhotoMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GroupPhotoMetadata.ProtoReflect.Descriptor instead.
 func (*GroupPhotoMetadata) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{26}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GroupPhotoMetadata) GetInstanceId() string {
@@ -1831,7 +1955,7 @@ type Group struct {
 
 func (x *Group) Reset() {
 	*x = Group{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[27]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1843,7 +1967,7 @@ func (x *Group) String() string {
 func (*Group) ProtoMessage() {}
 
 func (x *Group) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[27]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1856,7 +1980,7 @@ func (x *Group) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Group.ProtoReflect.Descriptor instead.
 func (*Group) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{27}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *Group) GetJid() string {
@@ -1914,7 +2038,7 @@ type AddParticipantsRequest struct {
 
 func (x *AddParticipantsRequest) Reset() {
 	*x = AddParticipantsRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[28]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1926,7 +2050,7 @@ func (x *AddParticipantsRequest) String() string {
 func (*AddParticipantsRequest) ProtoMessage() {}
 
 func (x *AddParticipantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[28]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1939,7 +2063,7 @@ func (x *AddParticipantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddParticipantsRequest.ProtoReflect.Descriptor instead.
 func (*AddParticipantsRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{28}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *AddParticipantsRequest) GetInstanceId() string {
@@ -1986,7 +2110,7 @@ type AddParticipantsResponse struct {
 
 func (x *AddParticipantsResponse) Reset() {
 	*x = AddParticipantsResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[29]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1998,7 +2122,7 @@ func (x *AddParticipantsResponse) String() string {
 func (*AddParticipantsResponse) ProtoMessage() {}
 
 func (x *AddParticipantsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[29]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2011,7 +2135,7 @@ func (x *AddParticipantsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddParticipantsResponse.ProtoReflect.Descriptor instead.
 func (*AddParticipantsResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{29}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *AddParticipantsResponse) GetSuccess() bool {
@@ -2034,7 +2158,7 @@ type RemoveParticipantsRequest struct {
 
 func (x *RemoveParticipantsRequest) Reset() {
 	*x = RemoveParticipantsRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[30]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2046,7 +2170,7 @@ func (x *RemoveParticipantsRequest) String() string {
 func (*RemoveParticipantsRequest) ProtoMessage() {}
 
 func (x *RemoveParticipantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[30]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2059,7 +2183,7 @@ func (x *RemoveParticipantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveParticipantsRequest.ProtoReflect.Descriptor instead.
 func (*RemoveParticipantsRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{30}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *RemoveParticipantsRequest) GetInstanceId() string {
@@ -2106,7 +2230,7 @@ type RemoveParticipantsResponse struct {
 
 func (x *RemoveParticipantsResponse) Reset() {
 	*x = RemoveParticipantsResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[31]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2118,7 +2242,7 @@ func (x *RemoveParticipantsResponse) String() string {
 func (*RemoveParticipantsResponse) ProtoMessage() {}
 
 func (x *RemoveParticipantsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[31]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2131,7 +2255,7 @@ func (x *RemoveParticipantsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveParticipantsResponse.ProtoReflect.Descriptor instead.
 func (*RemoveParticipantsResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{31}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RemoveParticipantsResponse) GetSuccess() bool {
@@ -2152,7 +2276,7 @@ type GroupInviteLinkRequest struct {
 
 func (x *GroupInviteLinkRequest) Reset() {
 	*x = GroupInviteLinkRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[32]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2164,7 +2288,7 @@ func (x *GroupInviteLinkRequest) String() string {
 func (*GroupInviteLinkRequest) ProtoMessage() {}
 
 func (x *GroupInviteLinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[32]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2177,7 +2301,7 @@ func (x *GroupInviteLinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GroupInviteLinkRequest.ProtoReflect.Descriptor instead.
 func (*GroupInviteLinkRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{32}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GroupInviteLinkRequest) GetInstanceId() string {
@@ -2210,7 +2334,7 @@ type GroupInviteLinkResponse struct {
 
 func (x *GroupInviteLinkResponse) Reset() {
 	*x = GroupInviteLinkResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[33]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2222,7 +2346,7 @@ func (x *GroupInviteLinkResponse) String() string {
 func (*GroupInviteLinkResponse) ProtoMessage() {}
 
 func (x *GroupInviteLinkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[33]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2235,7 +2359,7 @@ func (x *GroupInviteLinkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GroupInviteLinkResponse.ProtoReflect.Descriptor instead.
 func (*GroupInviteLinkResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{33}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *GroupInviteLinkResponse) GetInviteUrl() string {
@@ -2257,7 +2381,7 @@ type LeaveGroupRequest struct {
 
 func (x *LeaveGroupRequest) Reset() {
 	*x = LeaveGroupRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[34]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2269,7 +2393,7 @@ func (x *LeaveGroupRequest) String() string {
 func (*LeaveGroupRequest) ProtoMessage() {}
 
 func (x *LeaveGroupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[34]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2282,7 +2406,7 @@ func (x *LeaveGroupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaveGroupRequest.ProtoReflect.Descriptor instead.
 func (*LeaveGroupRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{34}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *LeaveGroupRequest) GetInstanceId() string {
@@ -2322,7 +2446,7 @@ type LeaveGroupResponse struct {
 
 func (x *LeaveGroupResponse) Reset() {
 	*x = LeaveGroupResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[35]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2334,7 +2458,7 @@ func (x *LeaveGroupResponse) String() string {
 func (*LeaveGroupResponse) ProtoMessage() {}
 
 func (x *LeaveGroupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[35]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2347,7 +2471,7 @@ func (x *LeaveGroupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeaveGroupResponse.ProtoReflect.Descriptor instead.
 func (*LeaveGroupResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{35}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *LeaveGroupResponse) GetSuccess() bool {
@@ -2370,7 +2494,7 @@ type PinChatRequest struct {
 
 func (x *PinChatRequest) Reset() {
 	*x = PinChatRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[36]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2382,7 +2506,7 @@ func (x *PinChatRequest) String() string {
 func (*PinChatRequest) ProtoMessage() {}
 
 func (x *PinChatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[36]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2395,7 +2519,7 @@ func (x *PinChatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PinChatRequest.ProtoReflect.Descriptor instead.
 func (*PinChatRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{36}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PinChatRequest) GetInstanceId() string {
@@ -2442,7 +2566,7 @@ type PinChatResponse struct {
 
 func (x *PinChatResponse) Reset() {
 	*x = PinChatResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[37]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2454,7 +2578,7 @@ func (x *PinChatResponse) String() string {
 func (*PinChatResponse) ProtoMessage() {}
 
 func (x *PinChatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[37]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2467,7 +2591,7 @@ func (x *PinChatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PinChatResponse.ProtoReflect.Descriptor instead.
 func (*PinChatResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{37}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PinChatResponse) GetSuccess() bool {
@@ -2490,7 +2614,7 @@ type MarkReadRequest struct {
 
 func (x *MarkReadRequest) Reset() {
 	*x = MarkReadRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[38]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2502,7 +2626,7 @@ func (x *MarkReadRequest) String() string {
 func (*MarkReadRequest) ProtoMessage() {}
 
 func (x *MarkReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[38]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2515,7 +2639,7 @@ func (x *MarkReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkReadRequest.ProtoReflect.Descriptor instead.
 func (*MarkReadRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{38}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *MarkReadRequest) GetInstanceId() string {
@@ -2562,7 +2686,7 @@ type MarkReadResponse struct {
 
 func (x *MarkReadResponse) Reset() {
 	*x = MarkReadResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[39]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2574,7 +2698,7 @@ func (x *MarkReadResponse) String() string {
 func (*MarkReadResponse) ProtoMessage() {}
 
 func (x *MarkReadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[39]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2587,7 +2711,7 @@ func (x *MarkReadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MarkReadResponse.ProtoReflect.Descriptor instead.
 func (*MarkReadResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{39}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *MarkReadResponse) GetSuccess() bool {
@@ -2610,7 +2734,7 @@ type SetChatReadStateRequest struct {
 
 func (x *SetChatReadStateRequest) Reset() {
 	*x = SetChatReadStateRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[40]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2622,7 +2746,7 @@ func (x *SetChatReadStateRequest) String() string {
 func (*SetChatReadStateRequest) ProtoMessage() {}
 
 func (x *SetChatReadStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[40]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2635,7 +2759,7 @@ func (x *SetChatReadStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetChatReadStateRequest.ProtoReflect.Descriptor instead.
 func (*SetChatReadStateRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{40}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *SetChatReadStateRequest) GetInstanceId() string {
@@ -2682,7 +2806,7 @@ type SetChatReadStateResponse struct {
 
 func (x *SetChatReadStateResponse) Reset() {
 	*x = SetChatReadStateResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[41]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2694,7 +2818,7 @@ func (x *SetChatReadStateResponse) String() string {
 func (*SetChatReadStateResponse) ProtoMessage() {}
 
 func (x *SetChatReadStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[41]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2707,7 +2831,7 @@ func (x *SetChatReadStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetChatReadStateResponse.ProtoReflect.Descriptor instead.
 func (*SetChatReadStateResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{41}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *SetChatReadStateResponse) GetSuccess() bool {
@@ -2727,7 +2851,7 @@ type CheckNumbersRequest struct {
 
 func (x *CheckNumbersRequest) Reset() {
 	*x = CheckNumbersRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[42]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2739,7 +2863,7 @@ func (x *CheckNumbersRequest) String() string {
 func (*CheckNumbersRequest) ProtoMessage() {}
 
 func (x *CheckNumbersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[42]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2752,7 +2876,7 @@ func (x *CheckNumbersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckNumbersRequest.ProtoReflect.Descriptor instead.
 func (*CheckNumbersRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{42}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *CheckNumbersRequest) GetInstanceId() string {
@@ -2781,7 +2905,7 @@ type NumberInfo struct {
 
 func (x *NumberInfo) Reset() {
 	*x = NumberInfo{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[43]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2793,7 +2917,7 @@ func (x *NumberInfo) String() string {
 func (*NumberInfo) ProtoMessage() {}
 
 func (x *NumberInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[43]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2806,7 +2930,7 @@ func (x *NumberInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NumberInfo.ProtoReflect.Descriptor instead.
 func (*NumberInfo) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{43}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *NumberInfo) GetPhone() string {
@@ -2846,7 +2970,7 @@ type CheckNumbersResponse struct {
 
 func (x *CheckNumbersResponse) Reset() {
 	*x = CheckNumbersResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[44]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2858,7 +2982,7 @@ func (x *CheckNumbersResponse) String() string {
 func (*CheckNumbersResponse) ProtoMessage() {}
 
 func (x *CheckNumbersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[44]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2871,7 +2995,7 @@ func (x *CheckNumbersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckNumbersResponse.ProtoReflect.Descriptor instead.
 func (*CheckNumbersResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{44}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *CheckNumbersResponse) GetResults() []*NumberInfo {
@@ -2890,7 +3014,7 @@ type GetUsageRequest struct {
 
 func (x *GetUsageRequest) Reset() {
 	*x = GetUsageRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[45]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2902,7 +3026,7 @@ func (x *GetUsageRequest) String() string {
 func (*GetUsageRequest) ProtoMessage() {}
 
 func (x *GetUsageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[45]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2915,7 +3039,7 @@ func (x *GetUsageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUsageRequest.ProtoReflect.Descriptor instead.
 func (*GetUsageRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{45}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetUsageRequest) GetTenantId() string {
@@ -2936,7 +3060,7 @@ type GetUsageResponse struct {
 
 func (x *GetUsageResponse) Reset() {
 	*x = GetUsageResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[46]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2948,7 +3072,7 @@ func (x *GetUsageResponse) String() string {
 func (*GetUsageResponse) ProtoMessage() {}
 
 func (x *GetUsageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[46]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2961,7 +3085,7 @@ func (x *GetUsageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetUsageResponse.ProtoReflect.Descriptor instead.
 func (*GetUsageResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{46}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *GetUsageResponse) GetTenantId() string {
@@ -2994,7 +3118,7 @@ type PairingStateRequest struct {
 
 func (x *PairingStateRequest) Reset() {
 	*x = PairingStateRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[47]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3006,7 +3130,7 @@ func (x *PairingStateRequest) String() string {
 func (*PairingStateRequest) ProtoMessage() {}
 
 func (x *PairingStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[47]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3019,7 +3143,7 @@ func (x *PairingStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PairingStateRequest.ProtoReflect.Descriptor instead.
 func (*PairingStateRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{47}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *PairingStateRequest) GetInstanceId() string {
@@ -3047,7 +3171,7 @@ type PairingStateInfo struct {
 
 func (x *PairingStateInfo) Reset() {
 	*x = PairingStateInfo{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[48]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3059,7 +3183,7 @@ func (x *PairingStateInfo) String() string {
 func (*PairingStateInfo) ProtoMessage() {}
 
 func (x *PairingStateInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[48]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3072,7 +3196,7 @@ func (x *PairingStateInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PairingStateInfo.ProtoReflect.Descriptor instead.
 func (*PairingStateInfo) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{48}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *PairingStateInfo) GetQrCode() string {
@@ -3126,7 +3250,7 @@ type GetContractRequest struct {
 
 func (x *GetContractRequest) Reset() {
 	*x = GetContractRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[49]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3138,7 +3262,7 @@ func (x *GetContractRequest) String() string {
 func (*GetContractRequest) ProtoMessage() {}
 
 func (x *GetContractRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[49]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3151,7 +3275,7 @@ func (x *GetContractRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetContractRequest.ProtoReflect.Descriptor instead.
 func (*GetContractRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{49}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *GetContractRequest) GetInstanceId() string {
@@ -3173,7 +3297,7 @@ type ScopeInfo struct {
 
 func (x *ScopeInfo) Reset() {
 	*x = ScopeInfo{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[50]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3185,7 +3309,7 @@ func (x *ScopeInfo) String() string {
 func (*ScopeInfo) ProtoMessage() {}
 
 func (x *ScopeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[50]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3198,7 +3322,7 @@ func (x *ScopeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScopeInfo.ProtoReflect.Descriptor instead.
 func (*ScopeInfo) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{50}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ScopeInfo) GetValue() string {
@@ -3235,7 +3359,7 @@ type ContractInfo struct {
 
 func (x *ContractInfo) Reset() {
 	*x = ContractInfo{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[51]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3247,7 +3371,7 @@ func (x *ContractInfo) String() string {
 func (*ContractInfo) ProtoMessage() {}
 
 func (x *ContractInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[51]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3260,7 +3384,7 @@ func (x *ContractInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContractInfo.ProtoReflect.Descriptor instead.
 func (*ContractInfo) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{51}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ContractInfo) GetTemplateId() string {
@@ -3349,16 +3473,20 @@ type GrantConsentRequest struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	InstanceId string                 `protobuf:"bytes,1,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
 	// scopes sao os OPCIONAIS aceitos; os obrigatorios entram sempre.
-	Scopes        []string `protobuf:"bytes,2,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	UserIp        string   `protobuf:"bytes,3,opt,name=user_ip,json=userIp,proto3" json:"user_ip,omitempty"`
-	UserAgent     string   `protobuf:"bytes,4,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	Scopes    []string `protobuf:"bytes,2,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	UserIp    string   `protobuf:"bytes,3,opt,name=user_ip,json=userIp,proto3" json:"user_ip,omitempty"`
+	UserAgent string   `protobuf:"bytes,4,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	// evidence (task 588, CA-06/CA-15) e a prova livre que so' o caminho
+	// tenant aceita -- objeto JSON <= 4KiB (mesma trava do REST); ausente e
+	// valido.
+	Evidence      *structpb.Struct `protobuf:"bytes,5,opt,name=evidence,proto3" json:"evidence,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GrantConsentRequest) Reset() {
 	*x = GrantConsentRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[52]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3370,7 +3498,7 @@ func (x *GrantConsentRequest) String() string {
 func (*GrantConsentRequest) ProtoMessage() {}
 
 func (x *GrantConsentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[52]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3383,7 +3511,7 @@ func (x *GrantConsentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrantConsentRequest.ProtoReflect.Descriptor instead.
 func (*GrantConsentRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{52}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *GrantConsentRequest) GetInstanceId() string {
@@ -3414,6 +3542,13 @@ func (x *GrantConsentRequest) GetUserAgent() string {
 	return ""
 }
 
+func (x *GrantConsentRequest) GetEvidence() *structpb.Struct {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
 type GrantConsentResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
@@ -3423,7 +3558,7 @@ type GrantConsentResponse struct {
 
 func (x *GrantConsentResponse) Reset() {
 	*x = GrantConsentResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[53]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3435,7 +3570,7 @@ func (x *GrantConsentResponse) String() string {
 func (*GrantConsentResponse) ProtoMessage() {}
 
 func (x *GrantConsentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[53]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3448,7 +3583,7 @@ func (x *GrantConsentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GrantConsentResponse.ProtoReflect.Descriptor instead.
 func (*GrantConsentResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{53}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *GrantConsentResponse) GetSuccess() bool {
@@ -3456,6 +3591,182 @@ func (x *GrantConsentResponse) GetSuccess() bool {
 		return x.Success
 	}
 	return false
+}
+
+// RequestConsentRequest (task 588, CA-13/CA-15) pede ao titular, por DM, que
+// autorize a instancia.
+type RequestConsentRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	InstanceId    string                 `protobuf:"bytes,1,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	Via           string                 `protobuf:"bytes,2,opt,name=via,proto3" json:"via,omitempty"`   // so' "whatsapp" hoje
+	To            string                 `protobuf:"bytes,3,opt,name=to,proto3" json:"to,omitempty"`     // "self" (default, vazio equivale) | "<phone>"
+	Text          string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"` // opcional -- default em pt-BR se vazio
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestConsentRequest) Reset() {
+	*x = RequestConsentRequest{}
+	mi := &file_syncz_v1_syncz_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestConsentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestConsentRequest) ProtoMessage() {}
+
+func (x *RequestConsentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_syncz_v1_syncz_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestConsentRequest.ProtoReflect.Descriptor instead.
+func (*RequestConsentRequest) Descriptor() ([]byte, []int) {
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *RequestConsentRequest) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *RequestConsentRequest) GetVia() string {
+	if x != nil {
+		return x.Via
+	}
+	return ""
+}
+
+func (x *RequestConsentRequest) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *RequestConsentRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type RequestConsentResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	Link          string                 `protobuf:"bytes,3,opt,name=link,proto3" json:"link,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestConsentResponse) Reset() {
+	*x = RequestConsentResponse{}
+	mi := &file_syncz_v1_syncz_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestConsentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestConsentResponse) ProtoMessage() {}
+
+func (x *RequestConsentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_syncz_v1_syncz_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestConsentResponse.ProtoReflect.Descriptor instead.
+func (*RequestConsentResponse) Descriptor() ([]byte, []int) {
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *RequestConsentResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RequestConsentResponse) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+func (x *RequestConsentResponse) GetLink() string {
+	if x != nil {
+		return x.Link
+	}
+	return ""
+}
+
+// UnpairInstanceRequest (task 588, CA-20/CA-15) desfaz o pareamento sem
+// apagar a instancia.
+type UnpairInstanceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnpairInstanceRequest) Reset() {
+	*x = UnpairInstanceRequest{}
+	mi := &file_syncz_v1_syncz_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnpairInstanceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnpairInstanceRequest) ProtoMessage() {}
+
+func (x *UnpairInstanceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_syncz_v1_syncz_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnpairInstanceRequest.ProtoReflect.Descriptor instead.
+func (*UnpairInstanceRequest) Descriptor() ([]byte, []int) {
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *UnpairInstanceRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 // GroupEvent e' o estado de um evento COMO O SYNC-ZAP O CONHECE.
@@ -3485,7 +3796,7 @@ type GroupEvent struct {
 
 func (x *GroupEvent) Reset() {
 	*x = GroupEvent{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[54]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3497,7 +3808,7 @@ func (x *GroupEvent) String() string {
 func (*GroupEvent) ProtoMessage() {}
 
 func (x *GroupEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[54]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3510,7 +3821,7 @@ func (x *GroupEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GroupEvent.ProtoReflect.Descriptor instead.
 func (*GroupEvent) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{54}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *GroupEvent) GetEventId() string {
@@ -3677,7 +3988,7 @@ type CreateGroupEventRequest struct {
 
 func (x *CreateGroupEventRequest) Reset() {
 	*x = CreateGroupEventRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[55]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3689,7 +4000,7 @@ func (x *CreateGroupEventRequest) String() string {
 func (*CreateGroupEventRequest) ProtoMessage() {}
 
 func (x *CreateGroupEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[55]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3702,7 +4013,7 @@ func (x *CreateGroupEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateGroupEventRequest.ProtoReflect.Descriptor instead.
 func (*CreateGroupEventRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{55}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *CreateGroupEventRequest) GetInstanceId() string {
@@ -3824,7 +4135,7 @@ type UpdateGroupEventRequest struct {
 
 func (x *UpdateGroupEventRequest) Reset() {
 	*x = UpdateGroupEventRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[56]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3836,7 +4147,7 @@ func (x *UpdateGroupEventRequest) String() string {
 func (*UpdateGroupEventRequest) ProtoMessage() {}
 
 func (x *UpdateGroupEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[56]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3849,7 +4160,7 @@ func (x *UpdateGroupEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateGroupEventRequest.ProtoReflect.Descriptor instead.
 func (*UpdateGroupEventRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{56}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *UpdateGroupEventRequest) GetInstanceId() string {
@@ -3945,7 +4256,7 @@ type CancelGroupEventRequest struct {
 
 func (x *CancelGroupEventRequest) Reset() {
 	*x = CancelGroupEventRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[57]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3957,7 +4268,7 @@ func (x *CancelGroupEventRequest) String() string {
 func (*CancelGroupEventRequest) ProtoMessage() {}
 
 func (x *CancelGroupEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[57]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3970,7 +4281,7 @@ func (x *CancelGroupEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelGroupEventRequest.ProtoReflect.Descriptor instead.
 func (*CancelGroupEventRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{57}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *CancelGroupEventRequest) GetInstanceId() string {
@@ -4016,7 +4327,7 @@ type ListGroupEventsRequest struct {
 
 func (x *ListGroupEventsRequest) Reset() {
 	*x = ListGroupEventsRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[58]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4028,7 +4339,7 @@ func (x *ListGroupEventsRequest) String() string {
 func (*ListGroupEventsRequest) ProtoMessage() {}
 
 func (x *ListGroupEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[58]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4041,7 +4352,7 @@ func (x *ListGroupEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListGroupEventsRequest.ProtoReflect.Descriptor instead.
 func (*ListGroupEventsRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{58}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *ListGroupEventsRequest) GetInstanceId() string {
@@ -4103,7 +4414,7 @@ type ListGroupEventsResponse struct {
 
 func (x *ListGroupEventsResponse) Reset() {
 	*x = ListGroupEventsResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[59]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4115,7 +4426,7 @@ func (x *ListGroupEventsResponse) String() string {
 func (*ListGroupEventsResponse) ProtoMessage() {}
 
 func (x *ListGroupEventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[59]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4128,7 +4439,7 @@ func (x *ListGroupEventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListGroupEventsResponse.ProtoReflect.Descriptor instead.
 func (*ListGroupEventsResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{59}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *ListGroupEventsResponse) GetEvents() []*GroupEvent {
@@ -4159,7 +4470,7 @@ type SendEventResponseRequest struct {
 
 func (x *SendEventResponseRequest) Reset() {
 	*x = SendEventResponseRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[60]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4171,7 +4482,7 @@ func (x *SendEventResponseRequest) String() string {
 func (*SendEventResponseRequest) ProtoMessage() {}
 
 func (x *SendEventResponseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[60]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4184,7 +4495,7 @@ func (x *SendEventResponseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendEventResponseRequest.ProtoReflect.Descriptor instead.
 func (*SendEventResponseRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{60}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *SendEventResponseRequest) GetInstanceId() string {
@@ -4240,7 +4551,7 @@ type SendEventResponseResponse struct {
 
 func (x *SendEventResponseResponse) Reset() {
 	*x = SendEventResponseResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[61]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4252,7 +4563,7 @@ func (x *SendEventResponseResponse) String() string {
 func (*SendEventResponseResponse) ProtoMessage() {}
 
 func (x *SendEventResponseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[61]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4265,7 +4576,7 @@ func (x *SendEventResponseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendEventResponseResponse.ProtoReflect.Descriptor instead.
 func (*SendEventResponseResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{61}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *SendEventResponseResponse) GetEventId() string {
@@ -4305,7 +4616,7 @@ type Poll struct {
 
 func (x *Poll) Reset() {
 	*x = Poll{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[62]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4317,7 +4628,7 @@ func (x *Poll) String() string {
 func (*Poll) ProtoMessage() {}
 
 func (x *Poll) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[62]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4330,7 +4641,7 @@ func (x *Poll) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Poll.ProtoReflect.Descriptor instead.
 func (*Poll) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{62}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *Poll) GetPollId() string {
@@ -4416,7 +4727,7 @@ type CreatePollRequest struct {
 
 func (x *CreatePollRequest) Reset() {
 	*x = CreatePollRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[63]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4428,7 +4739,7 @@ func (x *CreatePollRequest) String() string {
 func (*CreatePollRequest) ProtoMessage() {}
 
 func (x *CreatePollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[63]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4441,7 +4752,7 @@ func (x *CreatePollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreatePollRequest.ProtoReflect.Descriptor instead.
 func (*CreatePollRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{63}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *CreatePollRequest) GetInstanceId() string {
@@ -4506,7 +4817,7 @@ type ListPollsRequest struct {
 
 func (x *ListPollsRequest) Reset() {
 	*x = ListPollsRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[64]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4518,7 +4829,7 @@ func (x *ListPollsRequest) String() string {
 func (*ListPollsRequest) ProtoMessage() {}
 
 func (x *ListPollsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[64]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4531,7 +4842,7 @@ func (x *ListPollsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPollsRequest.ProtoReflect.Descriptor instead.
 func (*ListPollsRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{64}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *ListPollsRequest) GetInstanceId() string {
@@ -4579,7 +4890,7 @@ type ListPollsResponse struct {
 
 func (x *ListPollsResponse) Reset() {
 	*x = ListPollsResponse{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[65]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4591,7 +4902,7 @@ func (x *ListPollsResponse) String() string {
 func (*ListPollsResponse) ProtoMessage() {}
 
 func (x *ListPollsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[65]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4604,7 +4915,7 @@ func (x *ListPollsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPollsResponse.ProtoReflect.Descriptor instead.
 func (*ListPollsResponse) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{65}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *ListPollsResponse) GetPolls() []*Poll {
@@ -4631,7 +4942,7 @@ type GetPollResultsRequest struct {
 
 func (x *GetPollResultsRequest) Reset() {
 	*x = GetPollResultsRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[66]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4643,7 +4954,7 @@ func (x *GetPollResultsRequest) String() string {
 func (*GetPollResultsRequest) ProtoMessage() {}
 
 func (x *GetPollResultsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[66]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4656,7 +4967,7 @@ func (x *GetPollResultsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPollResultsRequest.ProtoReflect.Descriptor instead.
 func (*GetPollResultsRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{66}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *GetPollResultsRequest) GetInstanceId() string {
@@ -4689,7 +5000,7 @@ type PollResults struct {
 
 func (x *PollResults) Reset() {
 	*x = PollResults{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[67]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4701,7 +5012,7 @@ func (x *PollResults) String() string {
 func (*PollResults) ProtoMessage() {}
 
 func (x *PollResults) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[67]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4714,7 +5025,7 @@ func (x *PollResults) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollResults.ProtoReflect.Descriptor instead.
 func (*PollResults) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{67}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *PollResults) GetPollId() string {
@@ -4756,7 +5067,7 @@ type PollOptionTally struct {
 
 func (x *PollOptionTally) Reset() {
 	*x = PollOptionTally{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[68]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4768,7 +5079,7 @@ func (x *PollOptionTally) String() string {
 func (*PollOptionTally) ProtoMessage() {}
 
 func (x *PollOptionTally) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[68]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4781,7 +5092,7 @@ func (x *PollOptionTally) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PollOptionTally.ProtoReflect.Descriptor instead.
 func (*PollOptionTally) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{68}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *PollOptionTally) GetOption() string {
@@ -4819,7 +5130,7 @@ type ClosePollRequest struct {
 
 func (x *ClosePollRequest) Reset() {
 	*x = ClosePollRequest{}
-	mi := &file_syncz_v1_syncz_proto_msgTypes[69]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4831,7 +5142,7 @@ func (x *ClosePollRequest) String() string {
 func (*ClosePollRequest) ProtoMessage() {}
 
 func (x *ClosePollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_syncz_v1_syncz_proto_msgTypes[69]
+	mi := &file_syncz_v1_syncz_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4844,7 +5155,7 @@ func (x *ClosePollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClosePollRequest.ProtoReflect.Descriptor instead.
 func (*ClosePollRequest) Descriptor() ([]byte, []int) {
-	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{69}
+	return file_syncz_v1_syncz_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *ClosePollRequest) GetInstanceId() string {
@@ -4865,7 +5176,7 @@ var File_syncz_v1_syncz_proto protoreflect.FileDescriptor
 
 const file_syncz_v1_syncz_proto_rawDesc = "" +
 	"\n" +
-	"\x14syncz/v1/syncz.proto\x12\bsyncz.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x82\x01\n" +
+	"\x14syncz/v1/syncz.proto\x12\bsyncz.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x82\x01\n" +
 	"\x12SendMessageRequest\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x0e\n" +
@@ -4936,7 +5247,7 @@ const file_syncz_v1_syncz_proto_rawDesc = "" +
 	"\x06offset\x18\x02 \x01(\x05R\x06offset\"_\n" +
 	"\x15ListInstancesResponse\x120\n" +
 	"\tinstances\x18\x01 \x03(\v2\x12.syncz.v1.InstanceR\tinstances\x12\x14\n" +
-	"\x05total\x18\x02 \x01(\x05R\x05total\"\xef\x01\n" +
+	"\x05total\x18\x02 \x01(\x05R\x05total\"\xd5\x02\n" +
 	"\bInstance\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x12\x12\n" +
@@ -4946,7 +5257,21 @@ const file_syncz_v1_syncz_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"7\n" +
+	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x127\n" +
+	"\tpaired_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\bpairedAt\x12+\n" +
+	"\aconsent\x18\t \x01(\v2\x11.syncz.v1.ConsentR\aconsent\"\xd0\x02\n" +
+	"\aConsent\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\x12\x16\n" +
+	"\x06origin\x18\x02 \x01(\tR\x06origin\x12\x1d\n" +
+	"\n" +
+	"granted_by\x18\x03 \x01(\tR\tgrantedBy\x12=\n" +
+	"\frequested_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\vrequestedAt\x129\n" +
+	"\n" +
+	"granted_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tgrantedAt\x129\n" +
+	"\n" +
+	"revoked_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\trevokedAt\x12)\n" +
+	"\x10contract_version\x18\a \x01(\x05R\x0fcontractVersion\x12\x16\n" +
+	"\x06scopes\x18\b \x03(\tR\x06scopes\"7\n" +
 	"\x14NewWizardLinkRequest\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\"\x90\x01\n" +
@@ -5116,16 +5441,31 @@ const file_syncz_v1_syncz_proto_rawDesc = "" +
 	"\vbrand_color\x18\n" +
 	" \x01(\tR\n" +
 	"brandColor\x12%\n" +
-	"\x0eintro_markdown\x18\v \x01(\tR\rintroMarkdown\"\x86\x01\n" +
+	"\x0eintro_markdown\x18\v \x01(\tR\rintroMarkdown\"\xbb\x01\n" +
 	"\x13GrantConsentRequest\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x16\n" +
 	"\x06scopes\x18\x02 \x03(\tR\x06scopes\x12\x17\n" +
 	"\auser_ip\x18\x03 \x01(\tR\x06userIp\x12\x1d\n" +
 	"\n" +
-	"user_agent\x18\x04 \x01(\tR\tuserAgent\"0\n" +
+	"user_agent\x18\x04 \x01(\tR\tuserAgent\x123\n" +
+	"\bevidence\x18\x05 \x01(\v2\x17.google.protobuf.StructR\bevidence\"0\n" +
 	"\x14GrantConsentResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x84\x04\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"n\n" +
+	"\x15RequestConsentRequest\x12\x1f\n" +
+	"\vinstance_id\x18\x01 \x01(\tR\n" +
+	"instanceId\x12\x10\n" +
+	"\x03via\x18\x02 \x01(\tR\x03via\x12\x0e\n" +
+	"\x02to\x18\x03 \x01(\tR\x02to\x12\x12\n" +
+	"\x04text\x18\x04 \x01(\tR\x04text\"\x86\x01\n" +
+	"\x16RequestConsentResponse\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x129\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x12\n" +
+	"\x04link\x18\x03 \x01(\tR\x04link\"'\n" +
+	"\x15UnpairInstanceRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x84\x04\n" +
 	"\n" +
 	"GroupEvent\x12\x19\n" +
 	"\bevent_id\x18\x01 \x01(\tR\aeventId\x12\x1f\n" +
@@ -5276,7 +5616,7 @@ const file_syncz_v1_syncz_proto_rawDesc = "" +
 	"\x1fEVENT_RESPONSE_TYPE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19EVENT_RESPONSE_TYPE_GOING\x10\x01\x12!\n" +
 	"\x1dEVENT_RESPONSE_TYPE_NOT_GOING\x10\x02\x12\x1d\n" +
-	"\x19EVENT_RESPONSE_TYPE_MAYBE\x10\x032\x9c\x14\n" +
+	"\x19EVENT_RESPONSE_TYPE_MAYBE\x10\x032\xb8\x15\n" +
 	"\aSyncZap\x12J\n" +
 	"\vSendMessage\x12\x1c.syncz.v1.SendMessageRequest\x1a\x1d.syncz.v1.SendMessageResponse\x12F\n" +
 	"\tSendMedia\x12\x18.syncz.v1.SendMediaChunk\x1a\x1d.syncz.v1.SendMessageResponse(\x01\x12@\n" +
@@ -5313,7 +5653,9 @@ const file_syncz_v1_syncz_proto_rawDesc = "" +
 	"\tClosePoll\x12\x1a.syncz.v1.ClosePollRequest\x1a\x0e.syncz.v1.Poll\x12I\n" +
 	"\fPairingState\x12\x1d.syncz.v1.PairingStateRequest\x1a\x1a.syncz.v1.PairingStateInfo\x12C\n" +
 	"\vGetContract\x12\x1c.syncz.v1.GetContractRequest\x1a\x16.syncz.v1.ContractInfo\x12M\n" +
-	"\fGrantConsent\x12\x1d.syncz.v1.GrantConsentRequest\x1a\x1e.syncz.v1.GrantConsentResponse\x12A\n" +
+	"\fGrantConsent\x12\x1d.syncz.v1.GrantConsentRequest\x1a\x1e.syncz.v1.GrantConsentResponse\x12S\n" +
+	"\x0eRequestConsent\x12\x1f.syncz.v1.RequestConsentRequest\x1a .syncz.v1.RequestConsentResponse\x12E\n" +
+	"\x0eUnpairInstance\x12\x1f.syncz.v1.UnpairInstanceRequest\x1a\x12.syncz.v1.Instance\x12A\n" +
 	"\bGetUsage\x12\x19.syncz.v1.GetUsageRequest\x1a\x1a.syncz.v1.GetUsageResponseB4Z2github.com/quanturisai-ai/syncz-go/synczv1;synczv1b\x06proto3"
 
 var (
@@ -5329,7 +5671,7 @@ func file_syncz_v1_syncz_proto_rawDescGZIP() []byte {
 }
 
 var file_syncz_v1_syncz_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_syncz_v1_syncz_proto_msgTypes = make([]protoimpl.MessageInfo, 70)
+var file_syncz_v1_syncz_proto_msgTypes = make([]protoimpl.MessageInfo, 74)
 var file_syncz_v1_syncz_proto_goTypes = []any{
 	(EventResponseType)(0),             // 0: syncz.v1.EventResponseType
 	(*SendMessageRequest)(nil),         // 1: syncz.v1.SendMessageRequest
@@ -5349,160 +5691,176 @@ var file_syncz_v1_syncz_proto_goTypes = []any{
 	(*ListInstancesRequest)(nil),       // 15: syncz.v1.ListInstancesRequest
 	(*ListInstancesResponse)(nil),      // 16: syncz.v1.ListInstancesResponse
 	(*Instance)(nil),                   // 17: syncz.v1.Instance
-	(*NewWizardLinkRequest)(nil),       // 18: syncz.v1.NewWizardLinkRequest
-	(*WizardLink)(nil),                 // 19: syncz.v1.WizardLink
-	(*RevokeInstanceRequest)(nil),      // 20: syncz.v1.RevokeInstanceRequest
-	(*GetPolicyRequest)(nil),           // 21: syncz.v1.GetPolicyRequest
-	(*UpdatePolicyRequest)(nil),        // 22: syncz.v1.UpdatePolicyRequest
-	(*Policy)(nil),                     // 23: syncz.v1.Policy
-	(*CreateGroupRequest)(nil),         // 24: syncz.v1.CreateGroupRequest
-	(*UpdateGroupNameRequest)(nil),     // 25: syncz.v1.UpdateGroupNameRequest
-	(*GroupPhotoChunk)(nil),            // 26: syncz.v1.GroupPhotoChunk
-	(*GroupPhotoMetadata)(nil),         // 27: syncz.v1.GroupPhotoMetadata
-	(*Group)(nil),                      // 28: syncz.v1.Group
-	(*AddParticipantsRequest)(nil),     // 29: syncz.v1.AddParticipantsRequest
-	(*AddParticipantsResponse)(nil),    // 30: syncz.v1.AddParticipantsResponse
-	(*RemoveParticipantsRequest)(nil),  // 31: syncz.v1.RemoveParticipantsRequest
-	(*RemoveParticipantsResponse)(nil), // 32: syncz.v1.RemoveParticipantsResponse
-	(*GroupInviteLinkRequest)(nil),     // 33: syncz.v1.GroupInviteLinkRequest
-	(*GroupInviteLinkResponse)(nil),    // 34: syncz.v1.GroupInviteLinkResponse
-	(*LeaveGroupRequest)(nil),          // 35: syncz.v1.LeaveGroupRequest
-	(*LeaveGroupResponse)(nil),         // 36: syncz.v1.LeaveGroupResponse
-	(*PinChatRequest)(nil),             // 37: syncz.v1.PinChatRequest
-	(*PinChatResponse)(nil),            // 38: syncz.v1.PinChatResponse
-	(*MarkReadRequest)(nil),            // 39: syncz.v1.MarkReadRequest
-	(*MarkReadResponse)(nil),           // 40: syncz.v1.MarkReadResponse
-	(*SetChatReadStateRequest)(nil),    // 41: syncz.v1.SetChatReadStateRequest
-	(*SetChatReadStateResponse)(nil),   // 42: syncz.v1.SetChatReadStateResponse
-	(*CheckNumbersRequest)(nil),        // 43: syncz.v1.CheckNumbersRequest
-	(*NumberInfo)(nil),                 // 44: syncz.v1.NumberInfo
-	(*CheckNumbersResponse)(nil),       // 45: syncz.v1.CheckNumbersResponse
-	(*GetUsageRequest)(nil),            // 46: syncz.v1.GetUsageRequest
-	(*GetUsageResponse)(nil),           // 47: syncz.v1.GetUsageResponse
-	(*PairingStateRequest)(nil),        // 48: syncz.v1.PairingStateRequest
-	(*PairingStateInfo)(nil),           // 49: syncz.v1.PairingStateInfo
-	(*GetContractRequest)(nil),         // 50: syncz.v1.GetContractRequest
-	(*ScopeInfo)(nil),                  // 51: syncz.v1.ScopeInfo
-	(*ContractInfo)(nil),               // 52: syncz.v1.ContractInfo
-	(*GrantConsentRequest)(nil),        // 53: syncz.v1.GrantConsentRequest
-	(*GrantConsentResponse)(nil),       // 54: syncz.v1.GrantConsentResponse
-	(*GroupEvent)(nil),                 // 55: syncz.v1.GroupEvent
-	(*CreateGroupEventRequest)(nil),    // 56: syncz.v1.CreateGroupEventRequest
-	(*UpdateGroupEventRequest)(nil),    // 57: syncz.v1.UpdateGroupEventRequest
-	(*CancelGroupEventRequest)(nil),    // 58: syncz.v1.CancelGroupEventRequest
-	(*ListGroupEventsRequest)(nil),     // 59: syncz.v1.ListGroupEventsRequest
-	(*ListGroupEventsResponse)(nil),    // 60: syncz.v1.ListGroupEventsResponse
-	(*SendEventResponseRequest)(nil),   // 61: syncz.v1.SendEventResponseRequest
-	(*SendEventResponseResponse)(nil),  // 62: syncz.v1.SendEventResponseResponse
-	(*Poll)(nil),                       // 63: syncz.v1.Poll
-	(*CreatePollRequest)(nil),          // 64: syncz.v1.CreatePollRequest
-	(*ListPollsRequest)(nil),           // 65: syncz.v1.ListPollsRequest
-	(*ListPollsResponse)(nil),          // 66: syncz.v1.ListPollsResponse
-	(*GetPollResultsRequest)(nil),      // 67: syncz.v1.GetPollResultsRequest
-	(*PollResults)(nil),                // 68: syncz.v1.PollResults
-	(*PollOptionTally)(nil),            // 69: syncz.v1.PollOptionTally
-	(*ClosePollRequest)(nil),           // 70: syncz.v1.ClosePollRequest
-	(*timestamppb.Timestamp)(nil),      // 71: google.protobuf.Timestamp
+	(*Consent)(nil),                    // 18: syncz.v1.Consent
+	(*NewWizardLinkRequest)(nil),       // 19: syncz.v1.NewWizardLinkRequest
+	(*WizardLink)(nil),                 // 20: syncz.v1.WizardLink
+	(*RevokeInstanceRequest)(nil),      // 21: syncz.v1.RevokeInstanceRequest
+	(*GetPolicyRequest)(nil),           // 22: syncz.v1.GetPolicyRequest
+	(*UpdatePolicyRequest)(nil),        // 23: syncz.v1.UpdatePolicyRequest
+	(*Policy)(nil),                     // 24: syncz.v1.Policy
+	(*CreateGroupRequest)(nil),         // 25: syncz.v1.CreateGroupRequest
+	(*UpdateGroupNameRequest)(nil),     // 26: syncz.v1.UpdateGroupNameRequest
+	(*GroupPhotoChunk)(nil),            // 27: syncz.v1.GroupPhotoChunk
+	(*GroupPhotoMetadata)(nil),         // 28: syncz.v1.GroupPhotoMetadata
+	(*Group)(nil),                      // 29: syncz.v1.Group
+	(*AddParticipantsRequest)(nil),     // 30: syncz.v1.AddParticipantsRequest
+	(*AddParticipantsResponse)(nil),    // 31: syncz.v1.AddParticipantsResponse
+	(*RemoveParticipantsRequest)(nil),  // 32: syncz.v1.RemoveParticipantsRequest
+	(*RemoveParticipantsResponse)(nil), // 33: syncz.v1.RemoveParticipantsResponse
+	(*GroupInviteLinkRequest)(nil),     // 34: syncz.v1.GroupInviteLinkRequest
+	(*GroupInviteLinkResponse)(nil),    // 35: syncz.v1.GroupInviteLinkResponse
+	(*LeaveGroupRequest)(nil),          // 36: syncz.v1.LeaveGroupRequest
+	(*LeaveGroupResponse)(nil),         // 37: syncz.v1.LeaveGroupResponse
+	(*PinChatRequest)(nil),             // 38: syncz.v1.PinChatRequest
+	(*PinChatResponse)(nil),            // 39: syncz.v1.PinChatResponse
+	(*MarkReadRequest)(nil),            // 40: syncz.v1.MarkReadRequest
+	(*MarkReadResponse)(nil),           // 41: syncz.v1.MarkReadResponse
+	(*SetChatReadStateRequest)(nil),    // 42: syncz.v1.SetChatReadStateRequest
+	(*SetChatReadStateResponse)(nil),   // 43: syncz.v1.SetChatReadStateResponse
+	(*CheckNumbersRequest)(nil),        // 44: syncz.v1.CheckNumbersRequest
+	(*NumberInfo)(nil),                 // 45: syncz.v1.NumberInfo
+	(*CheckNumbersResponse)(nil),       // 46: syncz.v1.CheckNumbersResponse
+	(*GetUsageRequest)(nil),            // 47: syncz.v1.GetUsageRequest
+	(*GetUsageResponse)(nil),           // 48: syncz.v1.GetUsageResponse
+	(*PairingStateRequest)(nil),        // 49: syncz.v1.PairingStateRequest
+	(*PairingStateInfo)(nil),           // 50: syncz.v1.PairingStateInfo
+	(*GetContractRequest)(nil),         // 51: syncz.v1.GetContractRequest
+	(*ScopeInfo)(nil),                  // 52: syncz.v1.ScopeInfo
+	(*ContractInfo)(nil),               // 53: syncz.v1.ContractInfo
+	(*GrantConsentRequest)(nil),        // 54: syncz.v1.GrantConsentRequest
+	(*GrantConsentResponse)(nil),       // 55: syncz.v1.GrantConsentResponse
+	(*RequestConsentRequest)(nil),      // 56: syncz.v1.RequestConsentRequest
+	(*RequestConsentResponse)(nil),     // 57: syncz.v1.RequestConsentResponse
+	(*UnpairInstanceRequest)(nil),      // 58: syncz.v1.UnpairInstanceRequest
+	(*GroupEvent)(nil),                 // 59: syncz.v1.GroupEvent
+	(*CreateGroupEventRequest)(nil),    // 60: syncz.v1.CreateGroupEventRequest
+	(*UpdateGroupEventRequest)(nil),    // 61: syncz.v1.UpdateGroupEventRequest
+	(*CancelGroupEventRequest)(nil),    // 62: syncz.v1.CancelGroupEventRequest
+	(*ListGroupEventsRequest)(nil),     // 63: syncz.v1.ListGroupEventsRequest
+	(*ListGroupEventsResponse)(nil),    // 64: syncz.v1.ListGroupEventsResponse
+	(*SendEventResponseRequest)(nil),   // 65: syncz.v1.SendEventResponseRequest
+	(*SendEventResponseResponse)(nil),  // 66: syncz.v1.SendEventResponseResponse
+	(*Poll)(nil),                       // 67: syncz.v1.Poll
+	(*CreatePollRequest)(nil),          // 68: syncz.v1.CreatePollRequest
+	(*ListPollsRequest)(nil),           // 69: syncz.v1.ListPollsRequest
+	(*ListPollsResponse)(nil),          // 70: syncz.v1.ListPollsResponse
+	(*GetPollResultsRequest)(nil),      // 71: syncz.v1.GetPollResultsRequest
+	(*PollResults)(nil),                // 72: syncz.v1.PollResults
+	(*PollOptionTally)(nil),            // 73: syncz.v1.PollOptionTally
+	(*ClosePollRequest)(nil),           // 74: syncz.v1.ClosePollRequest
+	(*timestamppb.Timestamp)(nil),      // 75: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),            // 76: google.protobuf.Struct
 }
 var file_syncz_v1_syncz_proto_depIdxs = []int32{
-	71, // 0: syncz.v1.SendMessageResponse.sent_at:type_name -> google.protobuf.Timestamp
+	75, // 0: syncz.v1.SendMessageResponse.sent_at:type_name -> google.protobuf.Timestamp
 	4,  // 1: syncz.v1.SendMediaChunk.metadata:type_name -> syncz.v1.MediaMetadata
-	71, // 2: syncz.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
+	75, // 2: syncz.v1.Event.occurred_at:type_name -> google.protobuf.Timestamp
 	9,  // 3: syncz.v1.PairingEvent.qr:type_name -> syncz.v1.QRCode
 	10, // 4: syncz.v1.PairingEvent.scanned:type_name -> syncz.v1.Scanned
 	11, // 5: syncz.v1.PairingEvent.paired:type_name -> syncz.v1.Paired
 	12, // 6: syncz.v1.PairingEvent.failed:type_name -> syncz.v1.Failed
-	71, // 7: syncz.v1.QRCode.expires_at:type_name -> google.protobuf.Timestamp
+	75, // 7: syncz.v1.QRCode.expires_at:type_name -> google.protobuf.Timestamp
 	17, // 8: syncz.v1.ListInstancesResponse.instances:type_name -> syncz.v1.Instance
-	71, // 9: syncz.v1.Instance.created_at:type_name -> google.protobuf.Timestamp
-	71, // 10: syncz.v1.Instance.updated_at:type_name -> google.protobuf.Timestamp
-	71, // 11: syncz.v1.WizardLink.expires_at:type_name -> google.protobuf.Timestamp
-	23, // 12: syncz.v1.UpdatePolicyRequest.policy:type_name -> syncz.v1.Policy
-	27, // 13: syncz.v1.GroupPhotoChunk.metadata:type_name -> syncz.v1.GroupPhotoMetadata
-	44, // 14: syncz.v1.CheckNumbersResponse.results:type_name -> syncz.v1.NumberInfo
-	71, // 15: syncz.v1.PairingStateInfo.expires_at:type_name -> google.protobuf.Timestamp
-	51, // 16: syncz.v1.ContractInfo.required_scopes:type_name -> syncz.v1.ScopeInfo
-	51, // 17: syncz.v1.ContractInfo.optional_scopes:type_name -> syncz.v1.ScopeInfo
-	55, // 18: syncz.v1.ListGroupEventsResponse.events:type_name -> syncz.v1.GroupEvent
-	0,  // 19: syncz.v1.SendEventResponseRequest.response:type_name -> syncz.v1.EventResponseType
-	0,  // 20: syncz.v1.SendEventResponseResponse.response:type_name -> syncz.v1.EventResponseType
-	63, // 21: syncz.v1.ListPollsResponse.polls:type_name -> syncz.v1.Poll
-	69, // 22: syncz.v1.PollResults.tallies:type_name -> syncz.v1.PollOptionTally
-	1,  // 23: syncz.v1.SyncZap.SendMessage:input_type -> syncz.v1.SendMessageRequest
-	3,  // 24: syncz.v1.SyncZap.SendMedia:input_type -> syncz.v1.SendMediaChunk
-	5,  // 25: syncz.v1.SyncZap.StreamEvents:input_type -> syncz.v1.StreamEventsRequest
-	7,  // 26: syncz.v1.SyncZap.StartPairing:input_type -> syncz.v1.StartPairingRequest
-	13, // 27: syncz.v1.SyncZap.CreateInstance:input_type -> syncz.v1.CreateInstanceRequest
-	14, // 28: syncz.v1.SyncZap.GetInstance:input_type -> syncz.v1.GetInstanceRequest
-	15, // 29: syncz.v1.SyncZap.ListInstances:input_type -> syncz.v1.ListInstancesRequest
-	18, // 30: syncz.v1.SyncZap.NewWizardLink:input_type -> syncz.v1.NewWizardLinkRequest
-	20, // 31: syncz.v1.SyncZap.RevokeInstance:input_type -> syncz.v1.RevokeInstanceRequest
-	21, // 32: syncz.v1.SyncZap.GetPolicy:input_type -> syncz.v1.GetPolicyRequest
-	22, // 33: syncz.v1.SyncZap.UpdatePolicy:input_type -> syncz.v1.UpdatePolicyRequest
-	24, // 34: syncz.v1.SyncZap.CreateGroup:input_type -> syncz.v1.CreateGroupRequest
-	25, // 35: syncz.v1.SyncZap.UpdateGroupName:input_type -> syncz.v1.UpdateGroupNameRequest
-	26, // 36: syncz.v1.SyncZap.UpdateGroupPhoto:input_type -> syncz.v1.GroupPhotoChunk
-	29, // 37: syncz.v1.SyncZap.AddParticipants:input_type -> syncz.v1.AddParticipantsRequest
-	31, // 38: syncz.v1.SyncZap.RemoveParticipants:input_type -> syncz.v1.RemoveParticipantsRequest
-	33, // 39: syncz.v1.SyncZap.GroupInviteLink:input_type -> syncz.v1.GroupInviteLinkRequest
-	35, // 40: syncz.v1.SyncZap.LeaveGroup:input_type -> syncz.v1.LeaveGroupRequest
-	37, // 41: syncz.v1.SyncZap.PinChat:input_type -> syncz.v1.PinChatRequest
-	39, // 42: syncz.v1.SyncZap.MarkRead:input_type -> syncz.v1.MarkReadRequest
-	41, // 43: syncz.v1.SyncZap.SetChatReadState:input_type -> syncz.v1.SetChatReadStateRequest
-	43, // 44: syncz.v1.SyncZap.CheckNumbers:input_type -> syncz.v1.CheckNumbersRequest
-	56, // 45: syncz.v1.SyncZap.CreateGroupEvent:input_type -> syncz.v1.CreateGroupEventRequest
-	57, // 46: syncz.v1.SyncZap.UpdateGroupEvent:input_type -> syncz.v1.UpdateGroupEventRequest
-	58, // 47: syncz.v1.SyncZap.CancelGroupEvent:input_type -> syncz.v1.CancelGroupEventRequest
-	59, // 48: syncz.v1.SyncZap.ListGroupEvents:input_type -> syncz.v1.ListGroupEventsRequest
-	61, // 49: syncz.v1.SyncZap.SendEventResponse:input_type -> syncz.v1.SendEventResponseRequest
-	64, // 50: syncz.v1.SyncZap.CreatePoll:input_type -> syncz.v1.CreatePollRequest
-	65, // 51: syncz.v1.SyncZap.ListPolls:input_type -> syncz.v1.ListPollsRequest
-	67, // 52: syncz.v1.SyncZap.GetPollResults:input_type -> syncz.v1.GetPollResultsRequest
-	70, // 53: syncz.v1.SyncZap.ClosePoll:input_type -> syncz.v1.ClosePollRequest
-	48, // 54: syncz.v1.SyncZap.PairingState:input_type -> syncz.v1.PairingStateRequest
-	50, // 55: syncz.v1.SyncZap.GetContract:input_type -> syncz.v1.GetContractRequest
-	53, // 56: syncz.v1.SyncZap.GrantConsent:input_type -> syncz.v1.GrantConsentRequest
-	46, // 57: syncz.v1.SyncZap.GetUsage:input_type -> syncz.v1.GetUsageRequest
-	2,  // 58: syncz.v1.SyncZap.SendMessage:output_type -> syncz.v1.SendMessageResponse
-	2,  // 59: syncz.v1.SyncZap.SendMedia:output_type -> syncz.v1.SendMessageResponse
-	6,  // 60: syncz.v1.SyncZap.StreamEvents:output_type -> syncz.v1.Event
-	8,  // 61: syncz.v1.SyncZap.StartPairing:output_type -> syncz.v1.PairingEvent
-	17, // 62: syncz.v1.SyncZap.CreateInstance:output_type -> syncz.v1.Instance
-	17, // 63: syncz.v1.SyncZap.GetInstance:output_type -> syncz.v1.Instance
-	16, // 64: syncz.v1.SyncZap.ListInstances:output_type -> syncz.v1.ListInstancesResponse
-	19, // 65: syncz.v1.SyncZap.NewWizardLink:output_type -> syncz.v1.WizardLink
-	17, // 66: syncz.v1.SyncZap.RevokeInstance:output_type -> syncz.v1.Instance
-	23, // 67: syncz.v1.SyncZap.GetPolicy:output_type -> syncz.v1.Policy
-	23, // 68: syncz.v1.SyncZap.UpdatePolicy:output_type -> syncz.v1.Policy
-	28, // 69: syncz.v1.SyncZap.CreateGroup:output_type -> syncz.v1.Group
-	28, // 70: syncz.v1.SyncZap.UpdateGroupName:output_type -> syncz.v1.Group
-	28, // 71: syncz.v1.SyncZap.UpdateGroupPhoto:output_type -> syncz.v1.Group
-	30, // 72: syncz.v1.SyncZap.AddParticipants:output_type -> syncz.v1.AddParticipantsResponse
-	32, // 73: syncz.v1.SyncZap.RemoveParticipants:output_type -> syncz.v1.RemoveParticipantsResponse
-	34, // 74: syncz.v1.SyncZap.GroupInviteLink:output_type -> syncz.v1.GroupInviteLinkResponse
-	36, // 75: syncz.v1.SyncZap.LeaveGroup:output_type -> syncz.v1.LeaveGroupResponse
-	38, // 76: syncz.v1.SyncZap.PinChat:output_type -> syncz.v1.PinChatResponse
-	40, // 77: syncz.v1.SyncZap.MarkRead:output_type -> syncz.v1.MarkReadResponse
-	42, // 78: syncz.v1.SyncZap.SetChatReadState:output_type -> syncz.v1.SetChatReadStateResponse
-	45, // 79: syncz.v1.SyncZap.CheckNumbers:output_type -> syncz.v1.CheckNumbersResponse
-	55, // 80: syncz.v1.SyncZap.CreateGroupEvent:output_type -> syncz.v1.GroupEvent
-	55, // 81: syncz.v1.SyncZap.UpdateGroupEvent:output_type -> syncz.v1.GroupEvent
-	55, // 82: syncz.v1.SyncZap.CancelGroupEvent:output_type -> syncz.v1.GroupEvent
-	60, // 83: syncz.v1.SyncZap.ListGroupEvents:output_type -> syncz.v1.ListGroupEventsResponse
-	62, // 84: syncz.v1.SyncZap.SendEventResponse:output_type -> syncz.v1.SendEventResponseResponse
-	63, // 85: syncz.v1.SyncZap.CreatePoll:output_type -> syncz.v1.Poll
-	66, // 86: syncz.v1.SyncZap.ListPolls:output_type -> syncz.v1.ListPollsResponse
-	68, // 87: syncz.v1.SyncZap.GetPollResults:output_type -> syncz.v1.PollResults
-	63, // 88: syncz.v1.SyncZap.ClosePoll:output_type -> syncz.v1.Poll
-	49, // 89: syncz.v1.SyncZap.PairingState:output_type -> syncz.v1.PairingStateInfo
-	52, // 90: syncz.v1.SyncZap.GetContract:output_type -> syncz.v1.ContractInfo
-	54, // 91: syncz.v1.SyncZap.GrantConsent:output_type -> syncz.v1.GrantConsentResponse
-	47, // 92: syncz.v1.SyncZap.GetUsage:output_type -> syncz.v1.GetUsageResponse
-	58, // [58:93] is the sub-list for method output_type
-	23, // [23:58] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	75, // 9: syncz.v1.Instance.created_at:type_name -> google.protobuf.Timestamp
+	75, // 10: syncz.v1.Instance.updated_at:type_name -> google.protobuf.Timestamp
+	75, // 11: syncz.v1.Instance.paired_at:type_name -> google.protobuf.Timestamp
+	18, // 12: syncz.v1.Instance.consent:type_name -> syncz.v1.Consent
+	75, // 13: syncz.v1.Consent.requested_at:type_name -> google.protobuf.Timestamp
+	75, // 14: syncz.v1.Consent.granted_at:type_name -> google.protobuf.Timestamp
+	75, // 15: syncz.v1.Consent.revoked_at:type_name -> google.protobuf.Timestamp
+	75, // 16: syncz.v1.WizardLink.expires_at:type_name -> google.protobuf.Timestamp
+	24, // 17: syncz.v1.UpdatePolicyRequest.policy:type_name -> syncz.v1.Policy
+	28, // 18: syncz.v1.GroupPhotoChunk.metadata:type_name -> syncz.v1.GroupPhotoMetadata
+	45, // 19: syncz.v1.CheckNumbersResponse.results:type_name -> syncz.v1.NumberInfo
+	75, // 20: syncz.v1.PairingStateInfo.expires_at:type_name -> google.protobuf.Timestamp
+	52, // 21: syncz.v1.ContractInfo.required_scopes:type_name -> syncz.v1.ScopeInfo
+	52, // 22: syncz.v1.ContractInfo.optional_scopes:type_name -> syncz.v1.ScopeInfo
+	76, // 23: syncz.v1.GrantConsentRequest.evidence:type_name -> google.protobuf.Struct
+	75, // 24: syncz.v1.RequestConsentResponse.expires_at:type_name -> google.protobuf.Timestamp
+	59, // 25: syncz.v1.ListGroupEventsResponse.events:type_name -> syncz.v1.GroupEvent
+	0,  // 26: syncz.v1.SendEventResponseRequest.response:type_name -> syncz.v1.EventResponseType
+	0,  // 27: syncz.v1.SendEventResponseResponse.response:type_name -> syncz.v1.EventResponseType
+	67, // 28: syncz.v1.ListPollsResponse.polls:type_name -> syncz.v1.Poll
+	73, // 29: syncz.v1.PollResults.tallies:type_name -> syncz.v1.PollOptionTally
+	1,  // 30: syncz.v1.SyncZap.SendMessage:input_type -> syncz.v1.SendMessageRequest
+	3,  // 31: syncz.v1.SyncZap.SendMedia:input_type -> syncz.v1.SendMediaChunk
+	5,  // 32: syncz.v1.SyncZap.StreamEvents:input_type -> syncz.v1.StreamEventsRequest
+	7,  // 33: syncz.v1.SyncZap.StartPairing:input_type -> syncz.v1.StartPairingRequest
+	13, // 34: syncz.v1.SyncZap.CreateInstance:input_type -> syncz.v1.CreateInstanceRequest
+	14, // 35: syncz.v1.SyncZap.GetInstance:input_type -> syncz.v1.GetInstanceRequest
+	15, // 36: syncz.v1.SyncZap.ListInstances:input_type -> syncz.v1.ListInstancesRequest
+	19, // 37: syncz.v1.SyncZap.NewWizardLink:input_type -> syncz.v1.NewWizardLinkRequest
+	21, // 38: syncz.v1.SyncZap.RevokeInstance:input_type -> syncz.v1.RevokeInstanceRequest
+	22, // 39: syncz.v1.SyncZap.GetPolicy:input_type -> syncz.v1.GetPolicyRequest
+	23, // 40: syncz.v1.SyncZap.UpdatePolicy:input_type -> syncz.v1.UpdatePolicyRequest
+	25, // 41: syncz.v1.SyncZap.CreateGroup:input_type -> syncz.v1.CreateGroupRequest
+	26, // 42: syncz.v1.SyncZap.UpdateGroupName:input_type -> syncz.v1.UpdateGroupNameRequest
+	27, // 43: syncz.v1.SyncZap.UpdateGroupPhoto:input_type -> syncz.v1.GroupPhotoChunk
+	30, // 44: syncz.v1.SyncZap.AddParticipants:input_type -> syncz.v1.AddParticipantsRequest
+	32, // 45: syncz.v1.SyncZap.RemoveParticipants:input_type -> syncz.v1.RemoveParticipantsRequest
+	34, // 46: syncz.v1.SyncZap.GroupInviteLink:input_type -> syncz.v1.GroupInviteLinkRequest
+	36, // 47: syncz.v1.SyncZap.LeaveGroup:input_type -> syncz.v1.LeaveGroupRequest
+	38, // 48: syncz.v1.SyncZap.PinChat:input_type -> syncz.v1.PinChatRequest
+	40, // 49: syncz.v1.SyncZap.MarkRead:input_type -> syncz.v1.MarkReadRequest
+	42, // 50: syncz.v1.SyncZap.SetChatReadState:input_type -> syncz.v1.SetChatReadStateRequest
+	44, // 51: syncz.v1.SyncZap.CheckNumbers:input_type -> syncz.v1.CheckNumbersRequest
+	60, // 52: syncz.v1.SyncZap.CreateGroupEvent:input_type -> syncz.v1.CreateGroupEventRequest
+	61, // 53: syncz.v1.SyncZap.UpdateGroupEvent:input_type -> syncz.v1.UpdateGroupEventRequest
+	62, // 54: syncz.v1.SyncZap.CancelGroupEvent:input_type -> syncz.v1.CancelGroupEventRequest
+	63, // 55: syncz.v1.SyncZap.ListGroupEvents:input_type -> syncz.v1.ListGroupEventsRequest
+	65, // 56: syncz.v1.SyncZap.SendEventResponse:input_type -> syncz.v1.SendEventResponseRequest
+	68, // 57: syncz.v1.SyncZap.CreatePoll:input_type -> syncz.v1.CreatePollRequest
+	69, // 58: syncz.v1.SyncZap.ListPolls:input_type -> syncz.v1.ListPollsRequest
+	71, // 59: syncz.v1.SyncZap.GetPollResults:input_type -> syncz.v1.GetPollResultsRequest
+	74, // 60: syncz.v1.SyncZap.ClosePoll:input_type -> syncz.v1.ClosePollRequest
+	49, // 61: syncz.v1.SyncZap.PairingState:input_type -> syncz.v1.PairingStateRequest
+	51, // 62: syncz.v1.SyncZap.GetContract:input_type -> syncz.v1.GetContractRequest
+	54, // 63: syncz.v1.SyncZap.GrantConsent:input_type -> syncz.v1.GrantConsentRequest
+	56, // 64: syncz.v1.SyncZap.RequestConsent:input_type -> syncz.v1.RequestConsentRequest
+	58, // 65: syncz.v1.SyncZap.UnpairInstance:input_type -> syncz.v1.UnpairInstanceRequest
+	47, // 66: syncz.v1.SyncZap.GetUsage:input_type -> syncz.v1.GetUsageRequest
+	2,  // 67: syncz.v1.SyncZap.SendMessage:output_type -> syncz.v1.SendMessageResponse
+	2,  // 68: syncz.v1.SyncZap.SendMedia:output_type -> syncz.v1.SendMessageResponse
+	6,  // 69: syncz.v1.SyncZap.StreamEvents:output_type -> syncz.v1.Event
+	8,  // 70: syncz.v1.SyncZap.StartPairing:output_type -> syncz.v1.PairingEvent
+	17, // 71: syncz.v1.SyncZap.CreateInstance:output_type -> syncz.v1.Instance
+	17, // 72: syncz.v1.SyncZap.GetInstance:output_type -> syncz.v1.Instance
+	16, // 73: syncz.v1.SyncZap.ListInstances:output_type -> syncz.v1.ListInstancesResponse
+	20, // 74: syncz.v1.SyncZap.NewWizardLink:output_type -> syncz.v1.WizardLink
+	17, // 75: syncz.v1.SyncZap.RevokeInstance:output_type -> syncz.v1.Instance
+	24, // 76: syncz.v1.SyncZap.GetPolicy:output_type -> syncz.v1.Policy
+	24, // 77: syncz.v1.SyncZap.UpdatePolicy:output_type -> syncz.v1.Policy
+	29, // 78: syncz.v1.SyncZap.CreateGroup:output_type -> syncz.v1.Group
+	29, // 79: syncz.v1.SyncZap.UpdateGroupName:output_type -> syncz.v1.Group
+	29, // 80: syncz.v1.SyncZap.UpdateGroupPhoto:output_type -> syncz.v1.Group
+	31, // 81: syncz.v1.SyncZap.AddParticipants:output_type -> syncz.v1.AddParticipantsResponse
+	33, // 82: syncz.v1.SyncZap.RemoveParticipants:output_type -> syncz.v1.RemoveParticipantsResponse
+	35, // 83: syncz.v1.SyncZap.GroupInviteLink:output_type -> syncz.v1.GroupInviteLinkResponse
+	37, // 84: syncz.v1.SyncZap.LeaveGroup:output_type -> syncz.v1.LeaveGroupResponse
+	39, // 85: syncz.v1.SyncZap.PinChat:output_type -> syncz.v1.PinChatResponse
+	41, // 86: syncz.v1.SyncZap.MarkRead:output_type -> syncz.v1.MarkReadResponse
+	43, // 87: syncz.v1.SyncZap.SetChatReadState:output_type -> syncz.v1.SetChatReadStateResponse
+	46, // 88: syncz.v1.SyncZap.CheckNumbers:output_type -> syncz.v1.CheckNumbersResponse
+	59, // 89: syncz.v1.SyncZap.CreateGroupEvent:output_type -> syncz.v1.GroupEvent
+	59, // 90: syncz.v1.SyncZap.UpdateGroupEvent:output_type -> syncz.v1.GroupEvent
+	59, // 91: syncz.v1.SyncZap.CancelGroupEvent:output_type -> syncz.v1.GroupEvent
+	64, // 92: syncz.v1.SyncZap.ListGroupEvents:output_type -> syncz.v1.ListGroupEventsResponse
+	66, // 93: syncz.v1.SyncZap.SendEventResponse:output_type -> syncz.v1.SendEventResponseResponse
+	67, // 94: syncz.v1.SyncZap.CreatePoll:output_type -> syncz.v1.Poll
+	70, // 95: syncz.v1.SyncZap.ListPolls:output_type -> syncz.v1.ListPollsResponse
+	72, // 96: syncz.v1.SyncZap.GetPollResults:output_type -> syncz.v1.PollResults
+	67, // 97: syncz.v1.SyncZap.ClosePoll:output_type -> syncz.v1.Poll
+	50, // 98: syncz.v1.SyncZap.PairingState:output_type -> syncz.v1.PairingStateInfo
+	53, // 99: syncz.v1.SyncZap.GetContract:output_type -> syncz.v1.ContractInfo
+	55, // 100: syncz.v1.SyncZap.GrantConsent:output_type -> syncz.v1.GrantConsentResponse
+	57, // 101: syncz.v1.SyncZap.RequestConsent:output_type -> syncz.v1.RequestConsentResponse
+	17, // 102: syncz.v1.SyncZap.UnpairInstance:output_type -> syncz.v1.Instance
+	48, // 103: syncz.v1.SyncZap.GetUsage:output_type -> syncz.v1.GetUsageResponse
+	67, // [67:104] is the sub-list for method output_type
+	30, // [30:67] is the sub-list for method input_type
+	30, // [30:30] is the sub-list for extension type_name
+	30, // [30:30] is the sub-list for extension extendee
+	0,  // [0:30] is the sub-list for field type_name
 }
 
 func init() { file_syncz_v1_syncz_proto_init() }
@@ -5520,19 +5878,19 @@ func file_syncz_v1_syncz_proto_init() {
 		(*PairingEvent_Paired)(nil),
 		(*PairingEvent_Failed)(nil),
 	}
-	file_syncz_v1_syncz_proto_msgTypes[25].OneofWrappers = []any{
+	file_syncz_v1_syncz_proto_msgTypes[26].OneofWrappers = []any{
 		(*GroupPhotoChunk_Metadata)(nil),
 		(*GroupPhotoChunk_Chunk)(nil),
 	}
-	file_syncz_v1_syncz_proto_msgTypes[55].OneofWrappers = []any{}
-	file_syncz_v1_syncz_proto_msgTypes[56].OneofWrappers = []any{}
+	file_syncz_v1_syncz_proto_msgTypes[59].OneofWrappers = []any{}
+	file_syncz_v1_syncz_proto_msgTypes[60].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_syncz_v1_syncz_proto_rawDesc), len(file_syncz_v1_syncz_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   70,
+			NumMessages:   74,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

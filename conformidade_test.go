@@ -84,6 +84,39 @@ func bateriaDeConformidade(t *testing.T, cli syncz.Cliente) {
 	if !errors.Is(err, syncz.ErrNaoEncontrado) {
 		t.Errorf("esperava ErrNaoEncontrado para instancia inexistente, obteve: %v", err)
 	}
+
+	// 6. RegistrarAceite com Evidencia (task 589, CA-16) -- os tres
+	// transportes precisam aceitar o campo sem erro.
+	if err := cli.RegistrarAceite(ctx, syncz.EntradaAceite{
+		InstanciaID: inst.ID,
+		IPTitular:   "203.0.113.9",
+		Evidencia:   map[string]any{"metodo": "conformidade"},
+	}); err != nil {
+		t.Errorf("RegistrarAceite com Evidencia falhou: %v", err)
+	}
+
+	// 7. SolicitarConsentimento (task 589, CA-16) -- os tres transportes
+	// precisam servir RequestConsent/consent-request.
+	pedido, err := cli.SolicitarConsentimento(ctx, syncz.EntradaSolicitarConsentimento{
+		InstanciaID: inst.ID,
+		Via:         "whatsapp",
+	})
+	if err != nil {
+		t.Fatalf("SolicitarConsentimento falhou: %v", err)
+	}
+	if pedido.RequestID == "" || pedido.Link == "" {
+		t.Errorf("esperava request_id e link nao vazios, obteve %+v", pedido)
+	}
+
+	// 8. Desparear (task 589, CA-16/CA-20) -- os tres transportes precisam
+	// servir UnpairInstance/unpair.
+	desparada, err := cli.Desparear(ctx, inst.ID)
+	if err != nil {
+		t.Fatalf("Desparear falhou: %v", err)
+	}
+	if desparada.ID == "" {
+		t.Errorf("esperava id nao vazio na instancia desparada")
+	}
 }
 
 type conformidadeGRPCServer struct {
@@ -131,6 +164,25 @@ func (s *conformidadeGRPCServer) SendMessage(_ context.Context, req *synczv1.Sen
 		Status:    "accepted",
 		SentAt:    timestamppb.Now(),
 	}, nil
+}
+
+// GrantConsent, RequestConsent e UnpairInstance (task 589, CA-16) -- fakes
+// minimos so' para provar que o transporte gRPC serve as tres operacoes
+// (bateriaDeConformidade nao inspeciona efeito colateral nenhum aqui).
+func (s *conformidadeGRPCServer) GrantConsent(_ context.Context, _ *synczv1.GrantConsentRequest) (*synczv1.GrantConsentResponse, error) {
+	return &synczv1.GrantConsentResponse{Success: true}, nil
+}
+
+func (s *conformidadeGRPCServer) RequestConsent(_ context.Context, _ *synczv1.RequestConsentRequest) (*synczv1.RequestConsentResponse, error) {
+	return &synczv1.RequestConsentResponse{
+		RequestId: "req-grpc-conf",
+		ExpiresAt: timestamppb.Now(),
+		Link:      "https://conformidade.local/connect/consent?t=grpc",
+	}, nil
+}
+
+func (s *conformidadeGRPCServer) UnpairInstance(_ context.Context, req *synczv1.UnpairInstanceRequest) (*synczv1.Instance, error) {
+	return &synczv1.Instance{Id: req.GetId(), Status: "failed"}, nil
 }
 
 func TestConformidadeDosTresClientes(t *testing.T) {
@@ -185,6 +237,26 @@ func TestConformidadeDosTresClientes(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"message_id": "msg-rest-conf-1",
 				"status":     "accepted",
+			})
+		})
+		// GrantConsent, RequestConsent e Unpair (task 589, CA-16) -- fakes
+		// minimos, mesmo criterio dos handlers acima.
+		mux.HandleFunc("POST /api/v1/instances/{id}/consent", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		mux.HandleFunc("POST /api/v1/instances/{id}/consent/request", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"request_id": "req-rest-conf",
+				"expires_at": time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339),
+				"link":       "https://conformidade.local/connect/consent?t=rest",
+			})
+		})
+		mux.HandleFunc("POST /api/v1/instances/{id}/unpair", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":     r.PathValue("id"),
+				"status": "failed",
 			})
 		})
 

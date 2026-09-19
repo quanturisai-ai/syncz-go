@@ -214,6 +214,56 @@ func (s *sandboxCliente) RevogarInstancia(_ context.Context, id string) (Instanc
 	return *inst, nil
 }
 
+// Desparear (task 589, CA-16/CA-20) desfaz o pareamento sem apagar a
+// instancia -- zera PareadoEm e Consentimento, igual ao servidor real
+// (unpair.go, task 593): o pareamento e' uma janela, nao um estado
+// permanente.
+func (s *sandboxCliente) Desparear(_ context.Context, instanciaID string) (Instancia, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return Instancia{}, err
+	}
+
+	inst, ok := s.instancias[instanciaID]
+	if !ok {
+		return Instancia{}, novoErroAPI(ErrNaoEncontrado, "instancia nao encontrada")
+	}
+	inst.Status = "failed"
+	inst.PareadoEm = nil
+	inst.Consentimento = ConsentimentoInfo{}
+	inst.AtualizadaEm = time.Now().UTC()
+	return *inst, nil
+}
+
+// SolicitarConsentimento (task 589, CA-16/CA-13) simula o pedido de
+// consentimento por DM -- devolve um link sintetico, sem enviar nada de
+// verdade.
+func (s *sandboxCliente) SolicitarConsentimento(_ context.Context, e EntradaSolicitarConsentimento) (PedidoConsentimento, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.checarErro(); err != nil {
+		return PedidoConsentimento{}, err
+	}
+	if e.InstanciaID == "" {
+		return PedidoConsentimento{}, novoErroAPI(ErrInvalido, "instancia_id obrigatorio")
+	}
+	if _, ok := s.instancias[e.InstanciaID]; !ok {
+		return PedidoConsentimento{}, novoErroAPI(ErrNaoEncontrado, "instancia nao encontrada")
+	}
+
+	agora := time.Now().UTC()
+	reqID := fmt.Sprintf("req-sandbox-%d", s.seqInst)
+	s.seqInst++
+	return PedidoConsentimento{
+		RequestID: reqID,
+		ExpiraEm:  agora.Add(24 * time.Hour),
+		Link:      "https://sandbox.local/connect/consent?t=" + reqID,
+	}, nil
+}
+
 // AtualizarEstadoDesejado simula PATCH .../instances/{id}: grava
 // EstadoDesejado e, ao desconectar uma instância "connected", também rebate
 // Status para "disconnected" -- mesmo efeito colateral que
@@ -326,6 +376,20 @@ func (s *sandboxCliente) RegistrarAceite(_ context.Context, e EntradaAceite) err
 
 	if e.InstanciaID == "" {
 		return novoErroAPI(ErrInvalido, "instancia_id obrigatorio")
+	}
+	// task 589, CA-16: aceite no sandbox tambem atualiza Consentimento, para
+	// ObterInstancia refletir granted logo depois -- mesma simetria que o
+	// servidor real (task 583, CA-08).
+	if inst, ok := s.instancias[e.InstanciaID]; ok {
+		agora := time.Now().UTC()
+		inst.Consentimento = ConsentimentoInfo{
+			Status:         "granted",
+			Origem:         "tenant",
+			ConcedidoPor:   "sandbox",
+			ConcedidoEm:    &agora,
+			VersaoContrato: 1,
+			Escopos:        e.EscoposOpcionais,
+		}
 	}
 	return nil
 }
