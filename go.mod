@@ -1,3 +1,4 @@
+// Deprecated: o SDK mudou para github.com/hub-now/syncz-go (v0.4.0+). Troque o caminho no go.mod e nos imports; a API é a mesma.
 module github.com/quanturisai-ai/syncz-go
 
 go 1.27.0

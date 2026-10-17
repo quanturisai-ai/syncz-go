@@ -1,3 +1,5 @@
+> **Obsoleto.** Este módulo mudou para [`github.com/hub-now/syncz-go`](https://github.com/hub-now/syncz-go) a partir da v0.4.0. Para migrar, troque o caminho no `go.mod` e nos imports; a API é a mesma. Esta v0.3.1 é igual à v0.3.0, só com o aviso.
+
 # syncz-go — SDK Go do sync-zap
 
 Cliente Go do gateway `sync-zap`. A mesma interface fala **REST** e **gRPC**: você
